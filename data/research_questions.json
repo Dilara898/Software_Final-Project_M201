@@ -1,0 +1,34 @@
+{
+  "questions": [
+    {
+      "id": "q1",
+      "text": "What is photosynthesis and what are its main stages?",
+      "difficulty": "easy",
+      "expected_sources": ["wikipedia"]
+    },
+    {
+      "id": "q2",
+      "text": "How do transformer-based language models handle long context windows?",
+      "difficulty": "medium",
+      "expected_sources": ["arxiv", "web"]
+    },
+    {
+      "id": "q3",
+      "text": "What were the main causes of the 2008 financial crisis?",
+      "difficulty": "medium",
+      "expected_sources": ["wikipedia", "web"]
+    },
+    {
+      "id": "q4",
+      "text": "What is the current state of fusion energy research?",
+      "difficulty": "hard",
+      "expected_sources": ["arxiv", "web"]
+    },
+    {
+      "id": "q5",
+      "text": "How does CRISPR-Cas9 gene editing work at a molecular level?",
+      "difficulty": "hard",
+      "expected_sources": ["wikipedia", "arxiv"]
+    }
+  ]
+}
