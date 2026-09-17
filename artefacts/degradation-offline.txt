@@ -1,0 +1,4 @@
+OFFLINE SIMULATION: fake providers, synthesis and history; no real HTTP/DB.
+1 failed: used=['arxiv', 'web']; failed=['wikipedia']; history=saved; answer=Offline simulation using [1], [2]
+2 failed: used=['web']; failed=['wikipedia', 'arxiv']; history=saved; answer=Offline simulation using [1]
+3 failed: NoSourcesError; failed=['wikipedia', 'arxiv', 'web']; synthesis_calls=0; history_rows=0

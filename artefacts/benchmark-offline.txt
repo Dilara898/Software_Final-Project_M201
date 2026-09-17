@@ -1,0 +1,15 @@
+HISTORICAL SNAPSHOT: measured with an earlier, uncommitted benchmark implementation.
+The original command below no longer reproduces that implementation. See benchmark-offline-v2.md and its CSV for the current method.
+
+OFFLINE SIMULATION: source collection only; no real provider timings.
+Python 3.14.0 | Windows
+5 questions x 3 sources; cache disabled; 3 repeats; same process/machine.
+Client creation/cleanup included equally in both modes. Synthesis and DB excluded.
+Sequential seconds: [3.1827193000353873, 3.0910838000127114, 3.229244100046344]
+Parallel seconds: [3.2453348999843, 3.102210599987302, 2.9159181999857537]
+Median sequential: 3.183s
+Median parallel: 3.102s
+Speedup: 1.03x
+Simulated bottleneck: arxiv (80 ms vs 40 ms each for other sources), plus client/scheduling overhead.
+Reproduce: python scripts/benchmark.py --offline --questions data/research_questions.json --repeats 3
+A live benchmark through role B's service is still required for the final report.
