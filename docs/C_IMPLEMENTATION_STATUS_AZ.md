@@ -59,3 +59,13 @@ Bu branch komanda review-u üçün təqdim edilir; real inteqrasiya ayrıca mər
 Repo daxilindəki 101 C testini ROLE_C.md-dəki əmrlə işlətmək mümkündür.
 Yuxarıdakı 117 nəticəsinə əlavə 16 orijinal smoke-testin lokal yoxlaması daxildir;
 onlar hazırkı branch-in test fayllarına daxil deyil.
+
+## Dərin review-dan sonrakı yoxlama (2026-09-17)
+
+- 116 C testi və ayrıca 16 dəyişdirilməmiş orijinal smoke-test keçdi: cəmi 132.
+- C statement/branch coverage yenə 99%-dir; Ruff və mypy keçdi.
+- Yeni 15 regression ssenarisi cancellation cleanup, warning logları, URL portları,
+  cache nəticə limiti, böyük rəqəmli istinad, live client timeout-u və benchmark
+  giriş faylının qorunmasını yoxlayır.
+- İlkin altı review problemi və əlavə giriş faylının üzərinə yazılma problemi
+  düzəldilib. Real A/B/D inteqrasiyası və live ölçmə yenə ayrıca yoxlanmalıdır.

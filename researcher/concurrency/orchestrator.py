@@ -63,6 +63,8 @@ def selected_sources(wanted: Sequence[str]) -> list[SourceName]:
 def valid_source(source: Source, name: str) -> bool:
     try:
         url = urlsplit(source.url)
+        # urlsplit defers malformed/out-of-range port validation until access.
+        _ = url.port
         return (
             source.origin == name
             and bool(source.title.strip())
@@ -153,6 +155,17 @@ class SourceOrchestrator:
                         "error_code": warning.code,
                     },
                 )
+            if error_code is not None:
+                log.warning(
+                    error_code,
+                    extra={
+                        "request_id": request_id,
+                        "source": name,
+                        "stage": "collection",
+                        "status": status,
+                        "error_code": error_code,
+                    },
+                )
             log.info(
                 "source_completed",
                 extra={
@@ -191,6 +204,12 @@ class SourceOrchestrator:
                             isinstance(s, Source) and valid_source(s, name) for s in hit
                         )
                     ):
+                        if len(hit) > self._max_results:
+                            warnings.append(
+                                self._warning(
+                                    "source_limit_applied", "cache_read", name
+                                )
+                            )
                         sources, status, cache_status = (
                             list(hit[: self._max_results]),
                             "ok",
@@ -302,7 +321,9 @@ class SourceOrchestrator:
                 finally:
                     # Await cleanup on success, errors and caller cancellation.
                     for task in tasks:
-                        if not task.done():
+                        # gather already forwards caller cancellation. Do not
+                        # interrupt an existing asynchronous finally block.
+                        if not task.done() and task.cancelling() == 0:
                             task.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
             else:

@@ -100,6 +100,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--service-factory is only valid with --live")
     if args.out and args.csv and args.out.resolve() == args.csv.resolve():
         parser.error("summary and CSV must use different paths")
+    if any(
+        output is not None and output.resolve() == args.questions.resolve()
+        for output in (args.out, args.csv)
+    ):
+        parser.error("output paths must not overwrite the questions dataset")
     try:
         raw = args.questions.read_bytes()
         questions = QuestionSet.model_validate_json(raw)
@@ -120,7 +125,11 @@ def main(argv: list[str] | None = None) -> int:
             questions,
             options,
             service_factory=factory,
-            client_factory=httpx.AsyncClient if args.live else offline_client,
+            client_factory=(
+                lambda: httpx.AsyncClient(timeout=options.source_timeout_seconds)
+            )
+            if args.live
+            else offline_client,
         )
     )
     label = (
