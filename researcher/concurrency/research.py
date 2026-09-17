@@ -72,11 +72,14 @@ def validate_answer(
         raise InvalidAnswerError(
             "The answer is empty or belongs to a different question."
         )
-    referenced = {
-        int(value.strip())
-        for match in _CITATIONS.finditer(answer.answer)
-        for value in match.group(1).split(",")
-    }
+    try:
+        referenced = {
+            int(value.strip())
+            for match in _CITATIONS.finditer(answer.answer)
+            for value in match.group(1).split(",")
+        }
+    except ValueError as exc:
+        raise InvalidAnswerError("A numeric source reference is invalid.") from exc
     indices = [citation.index for citation in answer.citations]
     if require_citations and not referenced:
         raise InvalidAnswerError("The answer has no numeric source references.")

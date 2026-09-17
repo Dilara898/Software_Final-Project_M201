@@ -16,7 +16,7 @@ Python 3.14 Windows (3.11 is not installed here).
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-concurrency.txt
 New-Item -ItemType Directory -Force .cache | Out-Null
-.\.venv\Scripts\python.exe -m pytest tests/test_orchestrator.py tests/test_c_lifecycle.py tests/test_c_research.py tests/test_c_benchmark.py --basetemp=.cache/pytest-c -q --cov=researcher.concurrency --cov-branch --cov-report=term-missing
+.\.venv\Scripts\python.exe -m pytest tests/test_orchestrator.py tests/test_c_lifecycle.py tests/test_c_research.py tests/test_c_benchmark.py tests/test_c_review_regressions.py --basetemp=.cache/pytest-c -q --cov=researcher.concurrency --cov-branch --cov-report=term-missing
 .\.venv\Scripts\python.exe scripts/benchmark.py --offline --repeats 3 --out artefacts/benchmark-offline-v2.md --csv artefacts/benchmark-offline-v2.csv
 .\.venv\Scripts\python.exe scripts/degradation_demo.py
 ```
@@ -76,6 +76,9 @@ Compose `ResearchOrchestrator(collector, synthesis, history)` where:
 Cancellation cleans up async source tasks and releases semaphore slots. Neither
 asyncio cancellation nor a caller timeout forcibly stops a synchronous SDK
 thread. B must configure SDK timeouts and prevent blocking the event loop.
+Cleanup avoids sending a redundant cancellation to already-cancelling tasks.
+A second explicit caller cancellation can still interrupt cleanup; adapters must
+cooperate with cancellation and release their own resources.
 
 ## Benchmark interpretation
 
@@ -88,6 +91,9 @@ between live runs. Failed/incomparable measured batches cause exit code 2 after
 artifacts are written. No performance threshold is asserted by unit tests.
 
 Live invocation requires `--live --service-factory package.module:factory`.
+The HTTP client uses the selected source timeout; the source deadline still
+bounds the complete fetch including retries. Service-level timeout overrides
+must be recorded separately. Output paths cannot replace the questions dataset.
 The B-owned synchronous factory must return an async FetchService ready for use
 with the injected client; it must not require unhandled async setup or teardown.
 Each batch creates a service. B must ensure provider pacing survives across

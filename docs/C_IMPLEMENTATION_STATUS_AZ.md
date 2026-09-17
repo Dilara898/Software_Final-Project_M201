@@ -12,7 +12,10 @@
 - Reproduksiya metadatası, ayrıca setup/teardown ölçümü və xam CSV ilə benchmark.
 - Bir/iki/üç mənbə nasazlığının offline demonstrasiyası.
 
-## Yoxlama nəticələri (2026-09-16)
+## Tarixi yoxlama nəticələri (2026-09-16, dərin review-dan əvvəl)
+
+Bu bölmə ilkin yoxlamanın tarixçəsidir. Cari nəticə 2026-09-17 yoxlamasına
+əsasən 116 C testi və ayrıca 16 orijinal smoke-test olmaqla cəmi 132 testdir.
 
 - 101 C testi + dəyişdirilməmiş 16 AI smoke-testi: **117 passed**.
 - `researcher.concurrency` statement/branch coverage: **99%** (yuvarlaqlaşdırılmış).
@@ -56,6 +59,18 @@ və bütün tətbiqin hazır olduğu iddia edilmir.
 
 Kod və offline artefaktlar `feat/c-concurrency-benchmark` branch-indədir.
 Bu branch komanda review-u üçün təqdim edilir; real inteqrasiya ayrıca mərhələdir.
-Repo daxilindəki 101 C testini ROLE_C.md-dəki əmrlə işlətmək mümkündür.
-Yuxarıdakı 117 nəticəsinə əlavə 16 orijinal smoke-testin lokal yoxlaması daxildir;
-onlar hazırkı branch-in test fayllarına daxil deyil.
+Repo daxilindəki 116 C testini ROLE_C.md-dəki əmrlə işlətmək mümkündür.
+Cari 132 test nəticəsi bu 116 C testindən və ayrıca lokalda yoxlanmış
+16 orijinal smoke-testdən ibarətdir. Orijinal smoke-testlər hazırkı branch-in
+test fayllarına daxil deyil. Əvvəlki 101 C / 117 ümumi nəticəsi yalnız
+2026-09-16 tarixli ilkin yoxlamaya aiddir.
+
+## Dərin review-dan sonrakı yoxlama (2026-09-17)
+
+- 116 C testi və ayrıca 16 dəyişdirilməmiş orijinal smoke-test keçdi: cəmi 132.
+- C statement/branch coverage yenə 99%-dir; Ruff və mypy keçdi.
+- Yeni 15 regression ssenarisi cancellation cleanup, warning logları, URL portları,
+  cache nəticə limiti, böyük rəqəmli istinad, live client timeout-u və benchmark
+  giriş faylının qorunmasını yoxlayır.
+- İlkin altı review problemi və əlavə giriş faylının üzərinə yazılma problemi
+  düzəldilib. Real A/B/D inteqrasiyası və live ölçmə yenə ayrıca yoxlanmalıdır.
