@@ -1,0 +1,25 @@
+# Part B (AI Service and Business Logic) — development dependencies.
+# Scoped requirements, to be reconciled by D with the final application
+# requirements.txt (see requirements-concurrency.txt for the same pattern).
+
+tenacity==9.1.4
+
+# Already required by ai/ and researcher/concurrency/, listed here again so
+# `pip install -r requirements-b.txt` alone is enough to run this role's code
+# and tests without needing requirements-concurrency.txt installed first.
+httpx==0.28.1
+pydantic==2.12.3
+numpy==2.3.4
+pytest==8.4.2
+pytest-asyncio==1.2.0
+pytest-cov==7.0.0
+ruff==0.14.0
+mypy==1.18.2
+
+# Only needed to actually call a live provider (lazily imported by
+# ai/providers/*.py; not required to run the Part B unit tests, which use
+# fakes). Install whichever provider(s) LLM_PROVIDER / fallbacks select.
+# anthropic
+# openai
+# google-genai
+# duckduckgo-search
