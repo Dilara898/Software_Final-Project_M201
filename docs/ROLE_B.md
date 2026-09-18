@@ -128,15 +128,33 @@ this revision:
   does not yet implement B-03's HTTP-status classifier (a 401 and a 429
   both still get uniform retry treatment via `ProviderError`) -- that
   remains open.
+- **B-03 (P2) — permanent HTTP errors (401/404) were retried the same as
+  transient ones (429/5xx).** `retry.py` previously retried every
+  `ProviderError` uniformly by type, regardless of what caused it.
+  `ai/sources.py` and `ai/providers/*.py` wrap the original SDK/httpx
+  exception as `ProviderError(f"...: {e}") from e`, so the HTTP status (if
+  any) is recoverable from the `__cause__` chain -- `retry.py` now walks it
+  (bounded depth, cycle-guarded via `_http_status_from`) looking for
+  `httpx.HTTPStatusError`'s `.response.status_code` or an SDK exception's
+  own `.status_code` (OpenAI/Anthropic `APIStatusError` style). `429` and
+  `5xx` are retried; other 4xx (401, 403, 404, 400, ...) are not. When no
+  status is discoverable (a plain connection failure, or an SDK shape this
+  doesn't recognize), the previous uniform-retry behavior is the fallback,
+  not a guess. Verified against the real `ai.sources.fetch_arxiv` behind an
+  `httpx.MockTransport` (the review's own method): 401 and 404 each get 1
+  call; 429 and 500 each get 3 (`max_attempts=3`); 429-then-200 recovers on
+  the 3rd attempt. Retry-`After`-aware backoff was considered and
+  deliberately not implemented in this pass (the review marks it optional)
+  -- `retry.py` still uses plain exponential backoff regardless of a
+  `Retry-After` header.
 
 Not yet fixed, tracked for follow-up (see the review for full detail):
-B-01 (shared `researcher/exceptions.py`), B-03 (retry classifier doesn't
-distinguish permanent 401/404 from transient 429/5xx), B-05 (no
-provider-level pacing/rate limiting), B-06 (empty `sources` still triggers
-one LLM factory call before failing), B-07 (Wikipedia's internal
-per-title summary-fetch swallows HTTP errors before they reach this
-wrapper's retry layer), plus the missing `logging_setup.py` and
-`core/logic.py` (source alias/dedup/validation) deliverables.
+B-01 (shared `researcher/exceptions.py`), B-05 (no provider-level
+pacing/rate limiting), B-06 (empty `sources` still triggers one LLM
+factory call before failing), B-07 (Wikipedia's internal per-title
+summary-fetch swallows HTTP errors before they reach this wrapper's retry
+layer), plus the missing `logging_setup.py` and `core/logic.py` (source
+alias/dedup/validation) deliverables.
 
 ## Known cross-role gap (not fixed here, flagged for the team)
 

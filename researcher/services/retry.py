@@ -28,7 +28,7 @@ import httpx
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -47,11 +47,10 @@ T = TypeVar("T")
 # httpx.TransportError covers connection-level failures (ConnectError,
 # ReadTimeout, WriteTimeout, PoolTimeout, NetworkError, ...) -- genuinely
 # transient network problems, as distinct from httpx.HTTPStatusError (a
-# real HTTP response with a 4xx/5xx status), which is not retried here:
-# whether a given status is transient (429/5xx) or permanent (401/404) is a
-# separate classification this module does not yet make (see docs/ROLE_B.md,
-# B-03) -- callers relying on ai/providers' ProviderError wrapping still get
-# retried uniformly until that classifier exists.
+# real HTTP response with a 4xx/5xx status), which is not retried here as a
+# blanket type: see `_should_retry` below for the HTTP-status classifier
+# that distinguishes a permanent 401/404 from a transient 429/5xx within
+# ProviderError specifically.
 RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     ProviderError,
     asyncio.TimeoutError,
@@ -60,15 +59,82 @@ RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
 )
 
 
+def _http_status_from(exc: BaseException, *, max_depth: int = 5) -> int | None:
+    """Walk `exc`'s `__cause__` chain (bounded depth, cycle-guarded) looking
+    for an HTTP status code, without ever reading or logging exception text.
+
+    `ai/providers/*.py` and `ai/sources.py` wrap the original SDK/httpx
+    exception as ``ProviderError(f"...: {e}") from e``, so the status code
+    (if any) lives one or more hops down `__cause__`, not on `ProviderError`
+    itself. Recognizes `httpx.HTTPStatusError`'s `.response.status_code` and
+    SDK exceptions that expose `.status_code` directly (e.g. OpenAI's and
+    Anthropic's `APIStatusError`). Returns `None` if no status code is
+    discoverable, e.g. a plain connection failure or an SDK shape this
+    wasn't written against.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    depth = 0
+    while current is not None and depth < max_depth:
+        if id(current) in seen:
+            break  # defensive cycle guard; __cause__ chains shouldn't cycle
+        seen.add(id(current))
+
+        status = getattr(current, "status_code", None)
+        if isinstance(status, int):
+            return status
+        response = getattr(current, "response", None)
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            return status
+
+        current = current.__cause__
+        depth += 1
+    return None
+
+
+def _is_transient_status(status: int) -> bool:
+    """429 (rate limited) and 5xx (server-side) are worth retrying; other
+    4xx (401 unauthorized, 404 not found, 400 bad request, ...) are not --
+    retrying a bad API key or a malformed request only wastes the caller's
+    timeout budget on an outcome that cannot change.
+    """
+    return status == 429 or 500 <= status < 600
+
+
+def _build_should_retry(
+    retry_exceptions: tuple[type[Exception], ...],
+) -> Callable[[BaseException], bool]:
+    def _should_retry(exc: BaseException) -> bool:
+        if not isinstance(exc, retry_exceptions):
+            return False
+        if isinstance(exc, ProviderError):
+            status = _http_status_from(exc)
+            if status is not None:
+                return _is_transient_status(status)
+            # No discoverable status (e.g. a plain connection failure, or an
+            # SDK error shape not covered by `_http_status_from`): fall back
+            # to the previous uniform-retry behavior rather than guessing.
+            return True
+        return True
+
+    return _should_retry
+
+
 def error_code_for(exc: BaseException) -> str:
     """Map an exception to a short, secret-free code for logs and warnings.
 
     Never include ``str(exc)`` in a log line or a user-facing message --
-    that is the whole point of this function existing.
+    that is the whole point of this function existing. An HTTP status code
+    is not sensitive and is included when discoverable, since it is the
+    single most useful piece of information for diagnosing a retry decision.
     """
     if isinstance(exc, asyncio.TimeoutError):
         return "provider_timeout"
     if isinstance(exc, ProviderError):
+        status = _http_status_from(exc)
+        if status is not None:
+            return f"provider_error_status_{status}"
         return "provider_error"
     if isinstance(exc, httpx.TransportError):
         return "transport_error"
@@ -108,12 +174,17 @@ def build_async_retrying(
     callers upstream (C's orchestrator/research workflow) keep seeing the
     exception types they already know how to handle
     (``ProviderError`` / ``httpx.HTTPError`` / ``TimeoutError``).
+
+    The retry predicate is `_should_retry` (see `_build_should_retry`), not
+    a plain type check: a `ProviderError` wrapping a permanent HTTP status
+    (401, 404, ...) is not retried even though `ProviderError` itself is in
+    `retry_exceptions`, while one wrapping a transient status (429, 5xx) is.
     """
     return AsyncRetrying(
         reraise=True,
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential_jitter(initial=initial_wait_seconds, max=max_wait_seconds),
-        retry=retry_if_exception_type(retry_exceptions),
+        retry=retry_if_exception(_build_should_retry(retry_exceptions)),
         before_sleep=_log_retry,
     )
 

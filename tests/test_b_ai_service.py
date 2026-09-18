@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import httpx
 import pytest
 
 from ai.providers.base import ProviderError
@@ -158,8 +159,6 @@ class TestAIFetchService:
 
     @pytest.mark.asyncio
     async def test_httpx_transport_error_is_retried_with_original_type(self, monkeypatch):
-        import httpx
-
         attempts = {"n": 0}
 
         async def flaky(query, *, max_results, client):
@@ -193,6 +192,93 @@ class TestAIFetchService:
         for record in caplog.records:
             assert secret not in record.getMessage()
             assert secret not in str(record.__dict__)
+
+
+class TestHttpStatusClassification:
+    """Regression tests for B-03: a permanent HTTP status (401, 404, ...)
+    wrapped as ProviderError must not be retried, while a transient one
+    (429, 5xx) must be -- using the real `ai.sources.fetch_arxiv` against an
+    `httpx.MockTransport`, exactly as the review reproduced the bug, rather
+    than a fake fetcher, since the classifier reads the exception chain
+    `fetch_arxiv` actually produces (ProviderError wrapping
+    httpx.HTTPStatusError via `raise_for_status()`).
+    """
+
+    def _mock_client(self, status_sequence):
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            status = status_sequence[min(calls["n"] - 1, len(status_sequence) - 1)]
+            if status == 200:
+                return httpx.Response(
+                    200,
+                    text='<?xml version="1.0"?>'
+                    '<feed xmlns="http://www.w3.org/2005/Atom"></feed>',
+                )
+            return httpx.Response(status, text="error body")
+
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler)), calls
+
+    @pytest.mark.asyncio
+    async def test_401_is_not_retried(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "arxiv", ai_service.fetch_arxiv)
+        client, calls = self._mock_client([401])
+        service = AIFetchService(max_attempts=3, initial_wait_seconds=0.01, max_wait_seconds=0.01)
+        with pytest.raises(ProviderError):
+            await service.fetch("arxiv", "q", client=client)
+        await client.aclose()
+        assert calls["n"] == 1
+
+    @pytest.mark.asyncio
+    async def test_404_is_not_retried(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "arxiv", ai_service.fetch_arxiv)
+        client, calls = self._mock_client([404])
+        service = AIFetchService(max_attempts=3, initial_wait_seconds=0.01, max_wait_seconds=0.01)
+        with pytest.raises(ProviderError):
+            await service.fetch("arxiv", "q", client=client)
+        await client.aclose()
+        assert calls["n"] == 1
+
+    @pytest.mark.asyncio
+    async def test_429_is_retried_up_to_max_attempts(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "arxiv", ai_service.fetch_arxiv)
+        client, calls = self._mock_client([429, 429, 429])
+        service = AIFetchService(max_attempts=3, initial_wait_seconds=0.01, max_wait_seconds=0.01)
+        with pytest.raises(ProviderError):
+            await service.fetch("arxiv", "q", client=client)
+        await client.aclose()
+        assert calls["n"] == 3
+
+    @pytest.mark.asyncio
+    async def test_500_is_retried_up_to_max_attempts(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "arxiv", ai_service.fetch_arxiv)
+        client, calls = self._mock_client([500, 500, 500])
+        service = AIFetchService(max_attempts=3, initial_wait_seconds=0.01, max_wait_seconds=0.01)
+        with pytest.raises(ProviderError):
+            await service.fetch("arxiv", "q", client=client)
+        await client.aclose()
+        assert calls["n"] == 3
+
+    @pytest.mark.asyncio
+    async def test_429_then_200_recovers(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "arxiv", ai_service.fetch_arxiv)
+        client, calls = self._mock_client([429, 429, 200])
+        service = AIFetchService(max_attempts=5, initial_wait_seconds=0.01, max_wait_seconds=0.01)
+        result = await service.fetch("arxiv", "q", client=client)
+        await client.aclose()
+        assert calls["n"] == 3
+        assert result == []  # empty <feed/> parses to no entries, not an error
+
+    def test_error_code_for_includes_http_status(self):
+        from researcher.services.retry import error_code_for
+
+        exc = ProviderError("arXiv query failed: 401")
+        exc.__cause__ = httpx.HTTPStatusError(
+            "401", request=httpx.Request("GET", "https://x.invalid"),
+            response=httpx.Response(401, request=httpx.Request("GET", "https://x.invalid")),
+        )
+        assert error_code_for(exc) == "provider_error_status_401"
 
 
 # ---------------------------------------------------------------------------
