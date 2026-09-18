@@ -246,3 +246,50 @@ async def call_with_retry(
     # AsyncRetrying either returns from inside the loop or raises (reraise=True);
     # this line exists only to satisfy static type checkers.
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+class RateLimiter:
+    """A simple async min-interval pacer (B-05).
+
+    `acquire()` waits, if necessary, until at least `min_interval_seconds`
+    has elapsed since the *previous* acquire from this same instance, so
+    back-to-back calls -- including retries -- don't hammer a provider
+    faster than the configured rate. Share one instance per provider/host;
+    a fresh instance per call defeats the point.
+
+    `min_interval_seconds=0` (the default) makes every `acquire()` a no-op,
+    so pacing is opt-in and doesn't change existing default timing.
+
+    The wait uses plain `asyncio.sleep`, so it is naturally cancellable
+    (cancelling the caller's task cancels the wait) and, since callers place
+    `acquire()` inside their own per-attempt timeout window, the wait time
+    counts against that budget rather than being "free" extra time.
+
+    `_now`/`_sleep` are injection points for tests (a fake clock), not for
+    production use.
+    """
+
+    def __init__(
+        self,
+        min_interval_seconds: float = 0.0,
+        *,
+        _now: Callable[[], float] | None = None,
+        _sleep: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
+        self._min_interval = min_interval_seconds
+        self._lock = asyncio.Lock()
+        self._last_acquire: float | None = None
+        self._now = _now or (lambda: asyncio.get_running_loop().time())
+        self._sleep = _sleep or asyncio.sleep
+
+    async def acquire(self) -> None:
+        if self._min_interval <= 0:
+            return
+        async with self._lock:
+            now = self._now()
+            if self._last_acquire is not None:
+                wait = self._min_interval - (now - self._last_acquire)
+                if wait > 0:
+                    await self._sleep(wait)
+                    now = self._now()
+            self._last_acquire = now
