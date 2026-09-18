@@ -159,6 +159,7 @@ class TestAISynthesisService:
         service = AISynthesisService(llm_factories=[lambda: object()])
         result = await service.synthesize("q", [sample_source("web")])
         assert result.answer == "Supported [1]."
+        service.shutdown()
 
     @pytest.mark.asyncio
     async def test_retries_transient_failure_then_succeeds(self, monkeypatch):
@@ -180,6 +181,7 @@ class TestAISynthesisService:
         result = await service.synthesize("q", [sample_source("web")])
         assert attempts["n"] == 3
         assert result.answer == "Supported [1]."
+        service.shutdown()
 
     @pytest.mark.asyncio
     async def test_failover_to_second_provider_after_first_exhausts(self, monkeypatch):
@@ -207,6 +209,7 @@ class TestAISynthesisService:
         # Provider 0 tried (and retried) before falling over to provider 1.
         assert provider_used.count(0) == 2
         assert provider_used.count(1) == 1
+        service.shutdown()
 
     @pytest.mark.asyncio
     async def test_all_providers_exhausted_raises_upstream_data_error(self, monkeypatch):
@@ -222,6 +225,7 @@ class TestAISynthesisService:
         )
         with pytest.raises(UpstreamDataError):
             await service.synthesize("q", [sample_source("web")])
+        service.shutdown()
 
     @pytest.mark.asyncio
     async def test_value_error_is_not_retried_or_failed_over(self, monkeypatch):
@@ -244,7 +248,9 @@ class TestAISynthesisService:
         def always_slow(q, s, *, llm=None):
             import time
 
-            time.sleep(30)
+            # Short enough to keep the suite fast, long enough that the
+            # 0.05s per-attempt timeout below reliably fires first.
+            time.sleep(0.3)
 
         monkeypatch.setattr(ai_service, "synthesize", always_slow)
         service = AISynthesisService(
@@ -256,6 +262,57 @@ class TestAISynthesisService:
             await asyncio.wait_for(
                 service.synthesize("q", [sample_source("web")]), timeout=2
             )
+        service.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_synthesis_timeout_retries_do_not_pile_up_threads(self, monkeypatch):
+        """Regression test for B-02: a blocking synthesis call that keeps
+        running past its own timeout must not accumulate one concurrently
+        running thread per retry. `asyncio.to_thread`'s shared default
+        executor made this possible (verified: 3 attempts -> 3 threads
+        running at once); `AISynthesisService` must bound it instead.
+        """
+        import threading
+
+        active = {"n": 0, "peak": 0}
+        started = {"n": 0}
+        lock = threading.Lock()
+
+        def blocking_synth(q, s, *, llm=None):
+            import time
+
+            with lock:
+                started["n"] += 1
+                active["n"] += 1
+                active["peak"] = max(active["peak"], active["n"])
+            time.sleep(0.3)
+            with lock:
+                active["n"] -= 1
+            return fake_answer(q, s)
+
+        monkeypatch.setattr(ai_service, "synthesize", blocking_synth)
+        service = AISynthesisService(
+            llm_factories=[lambda: 0],
+            timeout_seconds=0.03,
+            max_attempts=3,
+            initial_wait_seconds=0.01,
+            max_wait_seconds=0.01,
+        )
+        start = asyncio.get_event_loop().time()
+        with pytest.raises(UpstreamDataError):
+            await service.synthesize("q", [sample_source("web")])
+        elapsed = asyncio.get_event_loop().time() - start
+
+        # The caller must not be blocked waiting for the stuck thread.
+        assert elapsed < 0.3
+        # At most one thread from this service is ever running at once.
+        assert active["peak"] == 1
+        # Only the first attempt ever actually started; the retries that
+        # were still queued behind it got cancelled instead of piling up.
+        assert started["n"] == 1
+
+        service.shutdown()
+        await asyncio.sleep(0.35)  # let the one real background thread finish
 
     def test_construction_requires_at_least_one_factory(self):
         with pytest.raises(ValueError):
@@ -281,6 +338,7 @@ class TestAISynthesisService:
         for record in caplog.records:
             assert secret not in record.getMessage()
             assert secret not in str(record.__dict__)
+        service.shutdown()
 
 
 # ---------------------------------------------------------------------------

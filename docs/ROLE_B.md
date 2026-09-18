@@ -33,11 +33,13 @@ student's wrapper code." `researcher/services/` is that wrapper code:
   - `AISynthesisService` implements C's `SynthesisService` port
     (`synthesize(question, sources) -> AnswerWithCitations`), wrapping the
     supplied, synchronous `ai.synthesizer.synthesize` (and whichever
-    synchronous SDK it calls) in `asyncio.to_thread`. **Multi-provider
-    failover (bonus):** if constructed with more than one LLM factory, each
-    is tried in order; a provider only moves to the next after exhausting
-    its own retry/backoff cycle. `default_llm_chain()` builds this from
-    `LLM_PROVIDER` plus an explicit list of fallback provider names.
+    synchronous SDK it calls) in a small, dedicated `ThreadPoolExecutor`
+    (`_BoundedThreadRunner`, default `max_workers=1`) rather than
+    `asyncio.to_thread`. **Multi-provider failover (bonus):** if
+    constructed with more than one LLM factory, each is tried in order; a
+    provider only moves to the next after exhausting its own retry/backoff
+    cycle. `default_llm_chain()` builds this from `LLM_PROVIDER` plus an
+    explicit list of fallback provider names.
   - `make_fetch_service()` / `make_synthesis_service()` — zero-argument
     factories for composition. `make_fetch_service` is the target C's live
     benchmark expects: `--service-factory
@@ -55,13 +57,25 @@ student's wrapper code." `researcher/services/` is that wrapper code:
   (`SourceOrchestrator.timeout_seconds`, `ResearchOrchestrator
   .synthesis_timeout_seconds`) — they are an inner budget, not a replacement
   for C's.
-- A blocking SDK call run via `asyncio.to_thread` cannot be forcibly killed
-  by `asyncio.wait_for`/cancellation. Keep `AISynthesisService.timeout_seconds`
-  at or below the provider SDK's own configured client timeout so a stuck
-  call eventually finishes on its own rather than leaking a thread. (SDK-side
+- A blocking SDK call cannot be forcibly killed by `asyncio.wait_for`/
+  cancellation, full stop — no `timeout_seconds` value, however small,
+  guarantees a stuck synchronous call actually stops. Keeping
+  `AISynthesisService.timeout_seconds` at or below the provider SDK's own
+  configured client timeout does not by itself prevent overlap either: if
+  the SDK's own call finishes *after* the caller's deadline for unrelated
+  reasons (network stall, server-side slowness), the two can still overlap.
+  What `AISynthesisService` actually guarantees, via `_BoundedThreadRunner`,
+  is *concurrency*, not cancellation: at most `max_concurrent_calls`
+  (default 1) of its own threads are ever running at once, regardless of
+  how many retries pile up against a stuck call — a retry whose own
+  timeout fires while it is still queued (not yet running) is cleanly
+  cancelled and never executes at all. See `ai_service.py`'s
+  `_BoundedThreadRunner` docstring for the full mechanism. (SDK-side client
   timeout configuration was not added to the shared `ai/providers/*.py`
   files in this pass, to avoid touching supplied/shared code without team
-  agreement — flag this if it needs revisiting.)
+  agreement — flag this if it needs revisiting; it would reduce how often a
+  thread runs past its caller's deadline in the first place, which this
+  fix does not prevent, only bound.)
 - Sources returned by `AIFetchService.fetch` must keep `origin == source`;
   C's `valid_source()` check discards anything else as invalid.
 - Read configuration (provider name, timeouts) from A's `researcher.config
@@ -80,6 +94,32 @@ python -m pytest tests/test_b_ai_service.py -q
 No API key or database is required — every test uses fakes for the
 underlying `ai.sources` fetchers and `ai.synthesizer.synthesize`, exactly
 like `tests/test_c_research.py` does for the concurrency layer.
+
+## Fixed after external review (2026-09-17, review of commit 3e52746)
+
+An external technical review of `feat/b-ai-service` at commit `3e52746`
+identified several real, reproduced issues (not style opinions). Fixed in
+this revision:
+
+- **B-02 (P1) — synthesis timeout retries piled up concurrent threads.**
+  `asyncio.to_thread` uses the event loop's shared default executor; a
+  timed-out retry started a *new* thread on top of the still-running
+  previous one (reproduced: 3 attempts -> 3 concurrently running threads
+  against a real LLM call). Fixed via `_BoundedThreadRunner`, above. This
+  was also silently responsible for the ~30s Part B test suite runtime
+  (each timeout-related test's stray thread delayed process exit); the
+  suite now runs in under 1 second.
+
+Not yet fixed, tracked for follow-up (see the review for full detail):
+B-01 (shared `researcher/exceptions.py`), B-03 (retry classifier doesn't
+distinguish permanent 401/404 from transient 429/5xx), B-04 (a bare
+`except Exception` in `AIFetchService._call` intercepts retryable
+`ConnectionError` before it reaches the retry policy), B-05 (no
+provider-level pacing/rate limiting), B-06 (empty `sources` still triggers
+one LLM factory call before failing), B-07 (Wikipedia's internal
+per-title summary-fetch swallows HTTP errors before they reach this
+wrapper's retry layer), plus the missing `logging_setup.py` and
+`core/logic.py` (source alias/dedup/validation) deliverables.
 
 ## Known cross-role gap (not fixed here, flagged for the team)
 

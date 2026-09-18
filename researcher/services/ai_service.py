@@ -23,8 +23,10 @@ Two zero-argument factories are exported for `scripts/benchmark.py
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 from collections.abc import Awaitable, Callable, Sequence
+from typing import TypeVar
 
 import httpx
 
@@ -37,6 +39,8 @@ from researcher.concurrency.contracts import UpstreamDataError
 from researcher.services.retry import call_with_retry, error_code_for
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 _Fetcher = Callable[..., Awaitable[list[Source]]]
 
@@ -172,20 +176,70 @@ def default_llm_chain(
     return chain
 
 
+class _BoundedThreadRunner:
+    """Runs blocking calls through a small, dedicated thread pool instead of
+    `asyncio.to_thread`'s shared, loop-wide default executor (capacity
+    ``min(32, cpu_count + 4)`` by default).
+
+    Why this exists (see docs/ROLE_B.md, B-02): a synchronous SDK call
+    cannot be forcibly killed once it is running -- neither asyncio
+    cancellation nor a caller `asyncio.wait_for` timeout stops the
+    underlying OS thread. With `asyncio.to_thread`, a retry after a timeout
+    therefore starts a brand-new thread *on top of* the one still running
+    the previous attempt: three retries against a real LLM API means three
+    real, concurrent, billed API calls for one logical request.
+
+    Routing every attempt from one caller through a pool bounded to
+    `max_workers` (default 1) fixes the *concurrency*, not the
+    un-killability: a new attempt cannot begin executing until a worker
+    slot is free, i.e. until the previous attempt's thread actually
+    finishes. If a queued attempt's own timeout fires before it was ever
+    given a worker, cancelling its (not-yet-started) `Future` succeeds and
+    removes it from the queue without ever running -- so a chain of
+    timeouts against a truly stuck call costs at most one real running
+    thread, not one per retry.
+    """
+
+    def __init__(self, *, max_workers: int = 1) -> None:
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="ai-synthesis"
+        )
+
+    async def run(self, fn: Callable[..., T], *args: object, **kwargs: object) -> T:
+        loop = asyncio.get_running_loop()
+        future: concurrent.futures.Future = self._executor.submit(fn, *args, **kwargs)
+        try:
+            return await asyncio.wrap_future(future, loop=loop)
+        except asyncio.CancelledError:
+            # No-op if the work item already started running (it cannot be
+            # stopped); removes it from the pool's queue if it had not.
+            future.cancel()
+            raise
+
+    def shutdown(self) -> None:
+        """Stop accepting new work; does not wait for a running thread."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+
 class AISynthesisService:
     """Adapts `ai.synthesizer.synthesize` (a blocking LLM call) to the async
     `SynthesisService` port.
 
     The underlying provider SDKs are synchronous, so each attempt runs in a
-    worker thread via `asyncio.to_thread`. Note the same caveat C's docs
-    call out: `asyncio.wait_for` bounds how long *this caller* waits, but it
-    cannot forcibly kill a blocking SDK thread. Keep `timeout_seconds` here
-    at or below the SDK client's own configured timeout so a stuck call
-    eventually finishes on its own rather than leaking a thread forever.
+    worker thread (see `_BoundedThreadRunner`). Note the same caveat C's
+    docs call out: `asyncio.wait_for` bounds how long *this caller* waits,
+    but it cannot forcibly kill a blocking SDK thread -- what
+    `_BoundedThreadRunner` guarantees is that at most `max_concurrent_calls`
+    such threads are ever running at once, not that a timed-out one stops.
+    Keep `timeout_seconds` here at or below the SDK client's own configured
+    timeout so a stuck call eventually finishes on its own.
 
     Bonus: multi-provider failover. If `llm_factories` has more than one
     entry, each is tried in order; a provider only moves to the next after
-    exhausting its own retry/backoff cycle.
+    exhausting its own retry/backoff cycle. All providers share the same
+    bounded thread pool, so a stuck primary-provider call also delays a
+    fallback provider's attempts from actually starting (though each still
+    observes its own `timeout_seconds` while queued).
     """
 
     def __init__(
@@ -197,6 +251,7 @@ class AISynthesisService:
         max_attempts: int = 3,
         initial_wait_seconds: float = 0.5,
         max_wait_seconds: float = 6.0,
+        max_concurrent_calls: int = 1,
     ) -> None:
         self._llm_factories = (
             list(llm_factories)
@@ -209,6 +264,12 @@ class AISynthesisService:
         self._max_attempts = max_attempts
         self._initial_wait_seconds = initial_wait_seconds
         self._max_wait_seconds = max_wait_seconds
+        self._thread_runner = _BoundedThreadRunner(max_workers=max_concurrent_calls)
+
+    def shutdown(self) -> None:
+        """Release this service's thread pool. Safe to call more than once;
+        does not wait for a currently-running (un-killable) thread."""
+        self._thread_runner.shutdown()
 
     async def synthesize(
         self,
@@ -230,8 +291,8 @@ class AISynthesisService:
                 )
                 continue
 
-            async def _call() -> AnswerWithCitations:
-                return await asyncio.to_thread(synthesize, question, sources, llm=llm)
+            async def _call(llm: LLMProvider = llm) -> AnswerWithCitations:
+                return await self._thread_runner.run(synthesize, question, sources, llm=llm)
 
             try:
                 return await call_with_retry(
