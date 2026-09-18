@@ -49,3 +49,16 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument("--limit", type=int, default=10)
 
     return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    parser.exit(
+        status=2,
+        message=(
+            f"researcher: '{args.command}' is not available yet. "
+            "Service integration is still in progress.\n"
+        ),
+    )
