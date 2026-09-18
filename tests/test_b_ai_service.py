@@ -105,7 +105,12 @@ class TestAIFetchService:
             )
 
     @pytest.mark.asyncio
-    async def test_unexpected_fetcher_error_is_not_retried(self, monkeypatch):
+    async def test_programmer_error_propagates_with_original_type(self, monkeypatch):
+        """Regression test for B-04: a bug in the fetcher itself (not a
+        provider/network failure) must surface as its own exception type,
+        not get relabeled as UpstreamDataError -- that label is reserved for
+        an actual malformed *return value*, checked separately below.
+        """
         attempts = {"n": 0}
 
         async def broken(query, *, max_results, client):
@@ -114,9 +119,62 @@ class TestAIFetchService:
 
         monkeypatch.setitem(ai_service._FETCHERS, "web", broken)
         service = AIFetchService(max_attempts=5)
-        with pytest.raises(UpstreamDataError):
+        with pytest.raises(RuntimeError):
             await service.fetch("web", "q", client=object())
         assert attempts["n"] == 1
+
+    @pytest.mark.asyncio
+    async def test_malformed_return_shape_raises_upstream_data_error(self, monkeypatch):
+        async def bad_shape(query, *, max_results, client):
+            return "not a list of Source objects"
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", bad_shape)
+        service = AIFetchService(max_attempts=3, initial_wait_seconds=0.01, max_wait_seconds=0.01)
+        with pytest.raises(UpstreamDataError):
+            await service.fetch("web", "q", client=object())
+
+    @pytest.mark.asyncio
+    async def test_connection_error_is_retried_with_original_type(self, monkeypatch):
+        """Regression test for B-04: a raw, retryable ConnectionError must
+        reach the retry policy (and be retried) instead of being swallowed
+        into UpstreamDataError by the fetch boundary before retry.py ever
+        sees it.
+        """
+        attempts = {"n": 0}
+
+        async def flaky(query, *, max_results, client):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise ConnectionError("raw transient network failure")
+            return [sample_source("web")]
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", flaky)
+        service = AIFetchService(
+            max_attempts=5, initial_wait_seconds=0.01, max_wait_seconds=0.01
+        )
+        result = await service.fetch("web", "q", client=object())
+        assert attempts["n"] == 3
+        assert result[0].origin == "web"
+
+    @pytest.mark.asyncio
+    async def test_httpx_transport_error_is_retried_with_original_type(self, monkeypatch):
+        import httpx
+
+        attempts = {"n": 0}
+
+        async def flaky(query, *, max_results, client):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise httpx.ConnectError("raw transport failure")
+            return [sample_source("web")]
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", flaky)
+        service = AIFetchService(
+            max_attempts=5, initial_wait_seconds=0.01, max_wait_seconds=0.01
+        )
+        result = await service.fetch("web", "q", client=object())
+        assert attempts["n"] == 3
+        assert result[0].origin == "web"
 
     @pytest.mark.asyncio
     async def test_no_secret_text_reaches_logs(self, monkeypatch, caplog):

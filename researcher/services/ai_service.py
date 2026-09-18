@@ -88,18 +88,22 @@ class AIFetchService:
             raise UpstreamDataError(f"no fetcher registered for source={source!r}")
 
         async def _call() -> list[Source]:
-            try:
-                return await fetcher(query, max_results=self._max_results, client=client)
-            except ProviderError:
-                raise
-            except UpstreamDataError:
-                raise
-            except Exception as exc:  # pragma: no cover - defensive boundary
-                # A fetcher returning a shape we didn't expect is bad data,
-                # not a transient failure; do not retry it.
+            # No broad `except Exception` here (B-04): the fetcher's own
+            # exceptions -- ProviderError, transient network errors, or a
+            # genuine programmer bug -- propagate unmodified. `call_with_retry`
+            # already knows what is retryable (retry.py's RETRYABLE_EXCEPTIONS);
+            # this function's only responsibility is validating the *shape*
+            # of a successful return, which is the one thing only this
+            # boundary can check.
+            result = await fetcher(query, max_results=self._max_results, client=client)
+            if not isinstance(result, list) or not all(
+                isinstance(item, Source) for item in result
+            ):
                 raise UpstreamDataError(
-                    f"unexpected error from {source} fetcher"
-                ) from exc
+                    f"{source} fetcher returned {type(result).__name__}, "
+                    "expected list[Source]"
+                )
+            return result
 
         try:
             return await call_with_retry(

@@ -24,6 +24,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
+import httpx
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
@@ -42,10 +43,20 @@ T = TypeVar("T")
 # input, malformed provider payloads mapped to UpstreamDataError, programming
 # errors) propagates on the first attempt -- retrying those would only burn
 # through the caller's timeout budget for no benefit.
+#
+# httpx.TransportError covers connection-level failures (ConnectError,
+# ReadTimeout, WriteTimeout, PoolTimeout, NetworkError, ...) -- genuinely
+# transient network problems, as distinct from httpx.HTTPStatusError (a
+# real HTTP response with a 4xx/5xx status), which is not retried here:
+# whether a given status is transient (429/5xx) or permanent (401/404) is a
+# separate classification this module does not yet make (see docs/ROLE_B.md,
+# B-03) -- callers relying on ai/providers' ProviderError wrapping still get
+# retried uniformly until that classifier exists.
 RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
     ProviderError,
     asyncio.TimeoutError,
     ConnectionError,
+    httpx.TransportError,
 )
 
 
@@ -59,6 +70,8 @@ def error_code_for(exc: BaseException) -> str:
         return "provider_timeout"
     if isinstance(exc, ProviderError):
         return "provider_error"
+    if isinstance(exc, httpx.TransportError):
+        return "transport_error"
     if isinstance(exc, ConnectionError):
         return "provider_connection_error"
     return f"provider_unexpected_{type(exc).__name__.lower()}"

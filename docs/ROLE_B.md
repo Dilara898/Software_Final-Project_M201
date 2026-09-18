@@ -109,12 +109,29 @@ this revision:
   was also silently responsible for the ~30s Part B test suite runtime
   (each timeout-related test's stray thread delayed process exit); the
   suite now runs in under 1 second.
+- **B-04 (P2) — a bare `except Exception` in `AIFetchService._call`
+  intercepted retryable errors and disguised programmer bugs.** The old
+  code caught every non-`ProviderError`/`UpstreamDataError` exception and
+  rewrapped it as `UpstreamDataError` before it ever reached the retry
+  policy. Two consequences, both reproduced: a raw, retryable
+  `ConnectionError` (already in `retry.py`'s `RETRYABLE_EXCEPTIONS`) got 1
+  call instead of 3; and an unrelated programmer bug (e.g. `RuntimeError`)
+  was silently relabeled as "bad upstream data" instead of surfacing as
+  itself. Fixed by removing the broad `except` entirely -- `_call` now only
+  validates the *shape* of a successful return (`isinstance` check that the
+  fetcher actually returned `list[Source]`) and raises `UpstreamDataError`
+  for that one case; every exception from the fetcher itself propagates
+  unmodified to `call_with_retry`, which already knows what is retryable.
+  Also added `httpx.TransportError` to `retry.py`'s `RETRYABLE_EXCEPTIONS`
+  (connection-level failures like `ConnectError`/`ReadTimeout`), since raw
+  transport errors were not retryable at all before this fix. Note this
+  does not yet implement B-03's HTTP-status classifier (a 401 and a 429
+  both still get uniform retry treatment via `ProviderError`) -- that
+  remains open.
 
 Not yet fixed, tracked for follow-up (see the review for full detail):
 B-01 (shared `researcher/exceptions.py`), B-03 (retry classifier doesn't
-distinguish permanent 401/404 from transient 429/5xx), B-04 (a bare
-`except Exception` in `AIFetchService._call` intercepts retryable
-`ConnectionError` before it reaches the retry policy), B-05 (no
+distinguish permanent 401/404 from transient 429/5xx), B-05 (no
 provider-level pacing/rate limiting), B-06 (empty `sources` still triggers
 one LLM factory call before failing), B-07 (Wikipedia's internal
 per-title summary-fetch swallows HTTP errors before they reach this
