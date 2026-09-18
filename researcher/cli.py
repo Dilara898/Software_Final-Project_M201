@@ -51,14 +51,83 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def show_history(limit: int) -> int:
+    import asyncio
+    import sys
+
+    import asyncpg
+    from pydantic import ValidationError as SettingsError
+
+    try:
+        from researcher.storage.db import get_pool, close_pool
+        from researcher.storage.history import list_sessions
+    except SettingsError:
+        print(
+            "Configuration error: check DATABASE_URL in your .env file.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        try:
+            pool = await asyncio.wait_for(get_pool(), timeout=10)
+            sessions = await asyncio.wait_for(
+                list_sessions(pool, limit=limit),
+                timeout=10,
+            )
+
+            if not sessions:
+                print("No previous queries found.")
+                return 0
+
+            for session in sessions:
+                print(f"\n#{session.id} | {session.created_at}")
+                print(f"Question: {session.question}")
+                print(f"Answer: {session.answer}")
+
+            return 0
+        finally:
+            await asyncio.wait_for(close_pool(), timeout=5)
+    except (asyncpg.PostgresError, OSError, TimeoutError) as exc:
+        print(f"Error type: {type(exc).__name__}", file=sys.stderr)
+        print(
+            "Cannot read history. Check the database connection and tables.",
+            file=sys.stderr,
+        )
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
+    import asyncio
+    import sys
+
+    from researcher.exceptions import ValidationError
+    from researcher.validation import validate_limit, validate_question
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    parser.exit(
-        status=2,
-        message=(
-            f"researcher: '{args.command}' is not available yet. "
-            "Service integration is still in progress.\n"
-        ),
+    try:
+        if args.command == "history":
+            limit = validate_limit(args.limit)
+            return asyncio.run(show_history(limit))
+
+        args.question = validate_question(args.question)
+    except ValidationError as exc:
+        print(f"researcher: {exc}", file=sys.stderr)
+        return 2
+    except ModuleNotFoundError as exc:
+        print(
+            f"Missing dependency: {exc.name}. Install project requirements.",
+            file=sys.stderr,
+        )
+        return 1
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return 130
+
+    print(
+        "researcher: 'ask' is not connected to the research service yet.",
+        file=sys.stderr,
     )
+    return 2
