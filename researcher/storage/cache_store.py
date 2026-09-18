@@ -1,9 +1,11 @@
+import asyncio
 import hashlib
 import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 
 from ai.schemas import Source
+
 
 class CacheStore(ABC):
     @abstractmethod
@@ -17,20 +19,23 @@ class InMemoryCacheStore(CacheStore):
     def __init__(self, ttl_seconds: int) -> None:
         self._ttl = ttl_seconds
         self._data: dict[str, tuple[datetime, list[Source]]] = {}
+        self._lock = asyncio.Lock()
 
     async def get(self, key):
-        hit = self._data.get(key)
-        if hit is None:
-            return None
-        expires_at, sources = hit
-        if expires_at <= datetime.now(timezone.utc):
-            del self._data[key]
-            return None
-        return sources
+        async with self._lock:
+            hit = self._data.get(key)
+            if hit is None:
+                return None
+            expires_at, sources = hit
+            if expires_at <= datetime.now(timezone.utc):
+                self._data.pop(key, None)
+                return None
+            return sources
 
     async def set(self, key, sources):
-        expires = datetime.now(timezone.utc) + timedelta(seconds=self._ttl)
-        self._data[key] = (expires, sources)
+        async with self._lock:
+            expires = datetime.now(timezone.utc) + timedelta(seconds=self._ttl)
+            self._data[key] = (expires, sources)
 
 
 def cache_key(source: str, question: str) -> str:
@@ -38,6 +43,8 @@ def cache_key(source: str, question: str) -> str:
     norm = " ".join(question.lower().split()).rstrip("?.!")
     digest = hashlib.sha256(norm.encode("utf-8")).hexdigest()
     return f"{source}:{digest}"
+
+
 class PostgresCacheStore(CacheStore):
     def __init__(self, pool, ttl_seconds: int) -> None:
         self._pool = pool
