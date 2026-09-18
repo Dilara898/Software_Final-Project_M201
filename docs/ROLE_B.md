@@ -2,11 +2,12 @@
 
 ## Scope and boundaries
 
-B owns `researcher/services/` (this file's code), its tests
-(`tests/test_b_ai_service.py`), `requirements-b.txt` and this document. The
-supplied `ai/` package and Part C's `researcher/concurrency/` are unchanged.
-A owns application settings/models/storage; C owns concurrency, the research
-workflow and the benchmark; D owns the CLI and Docker composition.
+B owns `researcher/services/` (this file's code), `researcher/exceptions.py`,
+its tests (`tests/test_b_ai_service.py`, `tests/test_b_exceptions.py`),
+`requirements-b.txt` and this document. The supplied `ai/` package and Part
+C's `researcher/concurrency/` are unchanged. A owns application
+settings/models/storage; C owns concurrency, the research workflow and the
+benchmark; D owns the CLI and Docker composition.
 
 ## What this module does
 
@@ -44,6 +45,11 @@ student's wrapper code." `researcher/services/` is that wrapper code:
     factories for composition. `make_fetch_service` is the target C's live
     benchmark expects: `--service-factory
     researcher.services.ai_service:make_fetch_service`.
+- `researcher/exceptions.py` — the shared, CLI-facing exception family
+  (`ResearcherError`, `ValidationError`, `NoSourcesError`) that D's
+  `researcher/validation.py` imports. See that module's own docstring for
+  how it relates to C's `OrchestrationError` family in
+  `researcher/concurrency/research.py` (deliberately not merged).
 
 ## Integration contract
 
@@ -147,14 +153,27 @@ this revision:
   deliberately not implemented in this pass (the review marks it optional)
   -- `retry.py` still uses plain exponential backoff regardless of a
   `Retry-After` header.
+- **B-01 (P1) — no shared exception module; D's `researcher/validation.py`
+  import raised `ModuleNotFoundError`.** `researcher/validation.py` did
+  `from researcher.exceptions import ValidationError`, but
+  `researcher/exceptions.py` did not exist anywhere in the repo. Added it
+  with the minimal family the review named: `ResearcherError` (base),
+  `ValidationError`, `NoSourcesError`. Deliberately does **not** touch or
+  subclass `researcher/concurrency/research.py`'s own `OrchestrationError`/
+  `NoSourcesError` (that file is C's; its `NoSourcesError` carries a
+  `.collection` diagnostic this shared one does not) -- the module's own
+  docstring documents the open decision (mapping at D's CLI boundary vs.
+  formal inheritance) rather than deciding it unilaterally. Verified the
+  exact failure the review reproduced is fixed: `from researcher.validation
+  import validate_question, validate_limit` now succeeds, and both
+  functions still raise the (now-real) `ValidationError` correctly.
 
 Not yet fixed, tracked for follow-up (see the review for full detail):
-B-01 (shared `researcher/exceptions.py`), B-05 (no provider-level
-pacing/rate limiting), B-06 (empty `sources` still triggers one LLM
-factory call before failing), B-07 (Wikipedia's internal per-title
-summary-fetch swallows HTTP errors before they reach this wrapper's retry
-layer), plus the missing `logging_setup.py` and `core/logic.py` (source
-alias/dedup/validation) deliverables.
+B-05 (no provider-level pacing/rate limiting), B-06 (empty `sources` still
+triggers one LLM factory call before failing), B-07 (Wikipedia's internal
+per-title summary-fetch swallows HTTP errors before they reach this
+wrapper's retry layer), plus the missing `logging_setup.py` and
+`core/logic.py` (source alias/dedup/validation) deliverables.
 
 ## Known cross-role gap (not fixed here, flagged for the team)
 
