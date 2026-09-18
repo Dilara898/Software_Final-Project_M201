@@ -14,6 +14,7 @@ import pytest
 from ai.providers.base import ProviderError
 from ai.schemas import AnswerWithCitations, Citation, Source
 from researcher.concurrency.contracts import UpstreamDataError
+from researcher.exceptions import NoSourcesError
 from researcher.services import ai_service
 from researcher.services.ai_service import (
     AIFetchService,
@@ -281,6 +282,112 @@ class TestHttpStatusClassification:
         assert error_code_for(exc) == "provider_error_status_401"
 
 
+class TestFetchServicePacing:
+    """Integration-level regression test for B-05: pacing must apply to
+    every attempt made through AIFetchService.fetch, including retries, not
+    just the first call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_pacing_applies_across_retries(self, monkeypatch):
+        import time
+
+        call_times: list[float] = []
+
+        async def flaky(query, *, max_results, client):
+            call_times.append(time.monotonic())
+            if len(call_times) < 3:
+                raise ProviderError("transient")
+            return []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", flaky)
+        service = AIFetchService(
+            max_attempts=5,
+            min_interval_seconds=0.05,
+            initial_wait_seconds=0.001,
+            max_wait_seconds=0.001,
+        )
+        await service.fetch("web", "q", client=object())
+        intervals = [call_times[i] - call_times[i - 1] for i in range(1, len(call_times))]
+        assert all(interval >= 0.04 for interval in intervals)  # small tolerance
+
+    @pytest.mark.asyncio
+    async def test_pacing_disabled_by_default(self, monkeypatch):
+        import time
+
+        call_times: list[float] = []
+
+        async def flaky(query, *, max_results, client):
+            call_times.append(time.monotonic())
+            if len(call_times) < 3:
+                raise ProviderError("transient")
+            return []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", flaky)
+        service = AIFetchService(
+            max_attempts=5, initial_wait_seconds=0.001, max_wait_seconds=0.001
+        )
+        start = time.monotonic()
+        await service.fetch("web", "q", client=object())
+        assert time.monotonic() - start < 0.1  # no artificial pacing delay
+
+
+class TestWikipediaTransportRetryIntegration:
+    """Integration-level regression test for B-07, through the full
+    AIFetchService.fetch path (not just the transport wrapper in
+    isolation -- see tests/test_b_transport.py for that).
+    """
+
+    @pytest.mark.asyncio
+    async def test_wikipedia_summary_500_then_200_recovers_through_fetch_service(
+        self, monkeypatch
+    ):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+        calls = {"summary": 0}
+
+        def handler(request):
+            if "opensearch" in str(request.url):
+                return httpx.Response(200, json=["q", ["Python"], [], []])
+            calls["summary"] += 1
+            if calls["summary"] < 2:
+                return httpx.Response(500, text="server error")
+            return httpx.Response(
+                200,
+                json={
+                    "title": "Python",
+                    "extract": "Python is a language.",
+                    "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Python"}},
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService(max_attempts=1)  # outer retry off; transport retry only
+        result = await service.fetch("wikipedia", "python", client=client)
+        await client.aclose()
+
+        assert len(result) == 1
+        assert calls["summary"] == 2
+
+    @pytest.mark.asyncio
+    async def test_can_be_disabled(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+        calls = {"summary": 0}
+
+        def handler(request):
+            if "opensearch" in str(request.url):
+                return httpx.Response(200, json=["q", ["Python"], [], []])
+            calls["summary"] += 1
+            return httpx.Response(500, text="server error")
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService(max_attempts=1, wikipedia_transport_retry=False)
+        result = await service.fetch("wikipedia", "python", client=client)
+        await client.aclose()
+
+        assert result == []
+        assert calls["summary"] == 1  # not retried -- feature disabled
+
+
 # ---------------------------------------------------------------------------
 # AISynthesisService
 # ---------------------------------------------------------------------------
@@ -461,6 +568,23 @@ class TestAISynthesisService:
     def test_construction_requires_at_least_one_factory(self):
         with pytest.raises(ValueError):
             AISynthesisService(llm_factories=[])
+
+    @pytest.mark.asyncio
+    async def test_empty_sources_raises_no_sources_error_without_touching_factory(self):
+        """Regression test for B-06: an empty source list must fail before
+        any provider factory, SDK, or retry machinery is touched.
+        """
+        calls = {"n": 0}
+
+        def factory():
+            calls["n"] += 1
+            return object()
+
+        service = AISynthesisService(llm_factories=[factory])
+        with pytest.raises(NoSourcesError):
+            await service.synthesize("q", [])
+        assert calls["n"] == 0
+        service.shutdown()
 
     @pytest.mark.asyncio
     async def test_no_secret_text_reaches_logs(self, monkeypatch, caplog):

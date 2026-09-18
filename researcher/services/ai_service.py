@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import time
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TypeVar
 
@@ -36,7 +37,9 @@ from ai.schemas import AnswerWithCitations, Source
 from ai.sources import fetch_arxiv, fetch_web, fetch_wikipedia
 from ai.synthesizer import synthesize
 from researcher.concurrency.contracts import UpstreamDataError
-from researcher.services.retry import call_with_retry, error_code_for
+from researcher.exceptions import NoSourcesError
+from researcher.services.retry import RateLimiter, call_with_retry, error_code_for
+from researcher.services.transport import wikipedia_retrying_client
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +61,18 @@ class AIFetchService:
     needed here (unlike synthesis). Each call gets its own retry-with-backoff
     cycle and a hard per-attempt timeout; C's own `timeout_seconds` /
     `max_concurrency` remain the *outer* budget this must fit inside.
+
+    Pacing (B-05): `min_interval_seconds` (default 0, disabled) applies a
+    shared `RateLimiter` per source name, so repeated calls -- including
+    retries -- to the same provider/host don't exceed the configured rate.
+
+    Wikipedia transport retry (B-07): when `source == "wikipedia"` and
+    `wikipedia_transport_retry` is enabled (default), the `client` passed
+    into `ai.sources.fetch_wikipedia` is wrapped so a transient HTTP status
+    on the internal per-title summary request is retried before
+    `fetch_wikipedia`'s own `except Exception: continue` ever sees it. See
+    `researcher.services.transport` for why this can't be fixed by editing
+    `ai/sources.py` itself.
     """
 
     def __init__(
@@ -68,12 +83,32 @@ class AIFetchService:
         max_attempts: int = 3,
         initial_wait_seconds: float = 0.5,
         max_wait_seconds: float = 4.0,
+        min_interval_seconds: float = 0.0,
+        wikipedia_transport_retry: bool = True,
+        wikipedia_transport_max_attempts: int = 3,
+        wikipedia_transport_initial_wait_seconds: float = 0.5,
+        wikipedia_transport_max_wait_seconds: float = 4.0,
     ) -> None:
         self._max_results = max_results
         self._timeout_seconds = timeout_seconds
         self._max_attempts = max_attempts
         self._initial_wait_seconds = initial_wait_seconds
         self._max_wait_seconds = max_wait_seconds
+        self._min_interval_seconds = min_interval_seconds
+        self._rate_limiters: dict[str, RateLimiter] = {}
+        self._wikipedia_transport_retry = wikipedia_transport_retry
+        self._wikipedia_transport_max_attempts = wikipedia_transport_max_attempts
+        self._wikipedia_transport_initial_wait_seconds = (
+            wikipedia_transport_initial_wait_seconds
+        )
+        self._wikipedia_transport_max_wait_seconds = wikipedia_transport_max_wait_seconds
+
+    def _limiter_for(self, source: str) -> RateLimiter:
+        limiter = self._rate_limiters.get(source)
+        if limiter is None:
+            limiter = RateLimiter(self._min_interval_seconds)
+            self._rate_limiters[source] = limiter
+        return limiter
 
     async def fetch(
         self,
@@ -87,15 +122,41 @@ class AIFetchService:
             # transient provider failure -- never retried.
             raise UpstreamDataError(f"no fetcher registered for source={source!r}")
 
+        limiter = self._limiter_for(source)
+
         async def _call() -> list[Source]:
-            # No broad `except Exception` here (B-04): the fetcher's own
-            # exceptions -- ProviderError, transient network errors, or a
-            # genuine programmer bug -- propagate unmodified. `call_with_retry`
-            # already knows what is retryable (retry.py's RETRYABLE_EXCEPTIONS);
-            # this function's only responsibility is validating the *shape*
-            # of a successful return, which is the one thing only this
-            # boundary can check.
-            result = await fetcher(query, max_results=self._max_results, client=client)
+            # B-05: pacing applies to every attempt, including retries.
+            await limiter.acquire()
+
+            # B-07: only wikipedia needs the transport-retry wrapper (its
+            # internal summary-fetch swallows transient errors); other
+            # sources already surface HTTP errors as ProviderError.
+            effective_client = client
+            wrapped_client: httpx.AsyncClient | None = None
+            if source == "wikipedia" and self._wikipedia_transport_retry:
+                wrapped_client = wikipedia_retrying_client(
+                    client,
+                    max_attempts=self._wikipedia_transport_max_attempts,
+                    initial_wait_seconds=self._wikipedia_transport_initial_wait_seconds,
+                    max_wait_seconds=self._wikipedia_transport_max_wait_seconds,
+                )
+                effective_client = wrapped_client
+
+            try:
+                # No broad `except Exception` here (B-04): the fetcher's own
+                # exceptions -- ProviderError, transient network errors, or a
+                # genuine programmer bug -- propagate unmodified.
+                # `call_with_retry` already knows what is retryable
+                # (retry.py's RETRYABLE_EXCEPTIONS); this function's only
+                # responsibility is validating the *shape* of a successful
+                # return, which is the one thing only this boundary can check.
+                result = await fetcher(
+                    query, max_results=self._max_results, client=effective_client
+                )
+            finally:
+                if wrapped_client is not None:
+                    await wrapped_client.aclose()
+
             if not isinstance(result, list) or not all(
                 isinstance(item, Source) for item in result
             ):
@@ -105,8 +166,9 @@ class AIFetchService:
                 )
             return result
 
+        start = time.monotonic()
         try:
-            return await call_with_retry(
+            result = await call_with_retry(
                 _call,
                 operation=f"fetch:{source}",
                 timeout_seconds=self._timeout_seconds,
@@ -120,6 +182,16 @@ class AIFetchService:
                 extra={"source": source, "error_code": error_code_for(exc)},
             )
             raise
+        else:
+            log.info(
+                "fetch_succeeded",
+                extra={
+                    "source": source,
+                    "result_count": len(result),
+                    "duration_ms": round((time.monotonic() - start) * 1000, 1),
+                },
+            )
+            return result
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +352,12 @@ class AISynthesisService:
         question: str,
         sources: list[Source],
     ) -> AnswerWithCitations:
+        if not sources:
+            # B-06: guard before touching any factory/SDK/retry machinery --
+            # an empty source list can never produce a synthesizable answer,
+            # so there is nothing a provider construction or retry could fix.
+            raise NoSourcesError("No sources were provided to synthesize an answer from.")
+
         last_exc: Exception | None = None
         for provider_index, factory in enumerate(self._llm_factories):
             try:
@@ -298,8 +376,9 @@ class AISynthesisService:
             async def _call(llm: LLMProvider = llm) -> AnswerWithCitations:
                 return await self._thread_runner.run(synthesize, question, sources, llm=llm)
 
+            start = time.monotonic()
             try:
-                return await call_with_retry(
+                result = await call_with_retry(
                     _call,
                     operation="synthesize",
                     timeout_seconds=self._timeout_seconds,
@@ -321,6 +400,16 @@ class AISynthesisService:
                     },
                 )
                 continue
+            else:
+                log.info(
+                    "synthesis_succeeded",
+                    extra={
+                        "provider_index": provider_index,
+                        "citation_count": len(result.citations),
+                        "duration_ms": round((time.monotonic() - start) * 1000, 1),
+                    },
+                )
+                return result
 
         raise UpstreamDataError(
             "All configured LLM providers failed to synthesize an answer."
