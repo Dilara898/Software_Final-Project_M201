@@ -16,7 +16,7 @@ Python 3.14 Windows (3.11 is not installed here).
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-concurrency.txt
 New-Item -ItemType Directory -Force .cache | Out-Null
-.\.venv\Scripts\python.exe -m pytest tests/test_orchestrator.py tests/test_c_lifecycle.py tests/test_c_research.py tests/test_c_benchmark.py tests/test_c_review_regressions.py --basetemp=.cache/pytest-c -q --cov=researcher.concurrency --cov-branch --cov-report=term-missing
+.\.venv\Scripts\python.exe -m pytest tests/test_orchestrator.py tests/test_c_lifecycle.py tests/test_c_research.py tests/test_c_benchmark.py tests/test_c_review_regressions.py tests/test_c_integration.py --basetemp=.cache/pytest-c -q --cov=researcher.concurrency --cov-branch --cov-report=term-missing
 .\.venv\Scripts\python.exe scripts/benchmark.py --offline --repeats 3 --out artefacts/benchmark-offline-v2.md --csv artefacts/benchmark-offline-v2.csv
 .\.venv\Scripts\python.exe scripts/degradation_demo.py
 ```
@@ -121,3 +121,73 @@ The original distributed smoke tests are not present in this repository's
 starter commit. They were copied unchanged into ignored `.cache/ai-contract/`
 for local verification; the shared setup owner should restore them unchanged
 in the final repository.
+
+## Adapters for the current A/D interfaces
+
+`researcher.concurrency.integration` now provides:
+
+- `StorageCacheAdapter(store)`: wrap A's InMemoryCacheStore or PostgresCacheStore.
+  PostgreSQL connection/unavailability errors become C's StorageUnavailableError;
+  invalid Pydantic cached Source data triggers fallback. Timeouts/cancellation
+  keep their original meaning; SQL schema and programming errors propagate.
+- `SessionHistoryAdapter(pool)`: maps C's SessionRecord fields to A's
+  ResearchSession and calls A's save_session exactly once. The pool remains
+  owned by application startup/shutdown; this adapter never calls get_pool.
+- `sources_from_cli(args.sources)`: delegates D's comma-separated selection to
+  B's `core.logic.select_sources`, including aliases, canonical ordering and
+  shared `researcher.exceptions.ValidationError`. None means all sources. Pass
+  `use_cache=not args.no_cache` to research.
+
+Composition at the application's existing startup point, after obtaining the
+pool, settings and HTTP client (imports omitted):
+
+```python
+cache = StorageCacheAdapter(PostgresCacheStore(pool, settings.cache_ttl_seconds))
+fetch_service = AIFetchService(
+    max_results=settings.max_sources_per_query,
+    timeout_seconds=settings.per_source_timeout_seconds,
+    min_interval_seconds=provider_interval_seconds,
+)
+synthesis_service = AISynthesisService(llm_factories=llm_factories)
+collector = SourceOrchestrator(
+    fetch_service, client=client, cache=cache, cache_key=cache_key,
+    timeout_seconds=settings.per_source_timeout_seconds,
+    max_concurrency=concurrency_limit,
+    max_results_per_source=settings.max_sources_per_query,
+)
+runner = ResearchOrchestrator(collector, synthesis_service, SessionHistoryAdapter(pool))
+try:
+    result = await runner.research(
+        question, sources_from_cli(args.sources), use_cache=not args.no_cache,
+    )
+finally:
+    synthesis_service.shutdown()
+```
+
+This is a composition example, not a standalone entry point. B's services are
+merged on main 386f3d4; final CLI lifecycle remains D-owned. The application owns
+the HTTP client, pool and synthesis service; do not construct a fresh synthesis
+service for each request. Shut it down once at application teardown, after all
+requests finish. Shutdown does not stop a running synchronous SDK call.
+The application supplies concurrency_limit, provider_interval_seconds and
+llm_factories from its agreed configuration; A's current Settings does not expose
+all these fields. B's default pacing interval is zero (disabled). Its Wikipedia
+transport retries and whole-fetch retries can both consume the source deadline.
+The outer C deadline covers pacing plus all attempts, not each attempt separately.
+
+Offline A/C compatibility tests live in tests/test_c_integration.py. They exercise
+A's actual memory/Postgres cache and history functions; DB operations are mocked.
+Real B wrappers and supplied Wikipedia/arXiv/synthesis functions are also exercised
+in tests/test_c_b_integration.py with HTTPX MockTransport and a fake LLM. Tests
+cover D parser mapping, cold/warm/bypass cache, summary retry, permanent source
+failure, citations, history and all-failed collection without constructing an LLM.
+Run `python -m pytest tests/test_c_integration.py tests/test_c_b_integration.py -q`.
+
+Main 7f10a7b fixes A's import-time settings failure with lazy `get_settings()`;
+the application should call it at startup, after parsing and validating input.
+The full offline suite now passes: 231 tests (including 136 C tests).
+B's shared exceptions now exist, so D validation imports successfully.
+C's NoSourcesError retains collection diagnostics; D should catch/map C's
+OrchestrationError family separately from B's ResearcherError family. A blank
+collection is stopped by C before B synthesis, so the two NoSourcesError types do
+not need to be merged or replaced.

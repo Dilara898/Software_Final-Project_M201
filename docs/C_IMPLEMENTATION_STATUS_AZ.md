@@ -14,7 +14,7 @@
 
 ## Tarixi yoxlama nəticələri (2026-09-16, dərin review-dan əvvəl)
 
-Bu bölmə ilkin yoxlamanın tarixçəsidir. Cari nəticə 2026-09-17 yoxlamasına
+Bu bölmə ilkin yoxlamanın tarixçəsidir. Dərin review mərhələsinin nəticəsi 2026-09-17 yoxlamasına
 əsasən 116 C testi və ayrıca 16 orijinal smoke-test olmaqla cəmi 132 testdir.
 
 - 101 C testi + dəyişdirilməmiş 16 AI smoke-testi: **117 passed**.
@@ -59,8 +59,8 @@ və bütün tətbiqin hazır olduğu iddia edilmir.
 
 Kod və offline artefaktlar `feat/c-concurrency-benchmark` branch-indədir.
 Bu branch komanda review-u üçün təqdim edilir; real inteqrasiya ayrıca mərhələdir.
-Repo daxilindəki 116 C testini ROLE_C.md-dəki əmrlə işlətmək mümkündür.
-Cari 132 test nəticəsi bu 116 C testindən və ayrıca lokalda yoxlanmış
+Dərin review mərhələsində repoda 116 C testi var idi. Cari say aşağıdakı 2026-09-18 yoxlama bölməsindədir.
+Həmin mərhələnin 132 test nəticəsi 116 C testindən və ayrıca lokalda yoxlanmış
 16 orijinal smoke-testdən ibarətdir. Orijinal smoke-testlər hazırkı branch-in
 test fayllarına daxil deyil. Əvvəlki 101 C / 117 ümumi nəticəsi yalnız
 2026-09-16 tarixli ilkin yoxlamaya aiddir.
@@ -74,3 +74,60 @@ test fayllarına daxil deyil. Əvvəlki 101 C / 117 ümumi nəticəsi yalnız
   giriş faylının qorunmasını yoxlayır.
 - İlkin altı review problemi və əlavə giriş faylının üzərinə yazılma problemi
   düzəldilib. Real A/B/D inteqrasiyası və live ölçmə yenə ayrıca yoxlanmalıdır.
+
+## A/D ilə uyğunlaşdırma (tarixi nəticə: main e49b8eb əsasında)
+
+- A-nın cache və history funksiyalarını bağlayan C adapterləri əlavə edilib;
+  shared A/B/D faylları dəyişdirilməyib.
+- D-nin ayrıca feat/d-cli branch-indəki parser ilə wiki → wikipedia və
+  --no-cache mapping-i offline yoxlanıb. Həmin branch main-ə merge edilməyib.
+- Həmin mərhələdə 16 uyğunluq testi ilə C test sayı 132 idi. A-nın 4 cache testi ilə
+  birlikdə seçilmiş suite-də 136 test keçib. Bunlar əvvəlki 116 C + 16 orijinal
+  smoke-test nəticəsi ilə eyni say hesabı deyil.
+- A-nın config testində import-time Settings xətası qalır; bütün ümumi suite-in
+  problemsiz keçdiyi iddia edilmir. B-nin AIService və exceptions modulları,
+  tətbiqin real CLI lifecycle-ı və real DB/API ölçmələri hələ gözlənilir.
+
+## Main və A/B/D ilə uyğunlaşdırma (2026-09-18, ilk yoxlama)
+
+- `feat/c-storage-integration` son `origin/main` (`386f3d4`) üzərinə
+  fast-forward edilib. B-nin servis/retry/exception/business-logic düzəlişləri
+  və D parser-i artıq lokaldadır; D-nin ayrıca entrypoint/Docker branch-ləri
+  bu main snapshot-ına daxil deyil.
+- `sources_from_cli` B-nin ortaq `select_sources` funksiyasına bağlanıb:
+  alias, dedup, canonical sıra və ValidationError eyni siyasətdən gəlir.
+- A storage adapterləri, B-nin real servisləri və verilmiş AI funksiyaları
+  ilə 20 inteqrasiya testi keçir. HTTP MockTransport, fake LLM və fake DB
+  istifadə olunur; real şəbəkə/SDK/PostgreSQL işləyişi iddia edilmir.
+- Cari C test sayı **136**-dır: əvvəlki 116 + 17 storage/source adapter testi
+  + 3 B/C workflow testi. Yeni workflow sınaqları cache hit/bypass, Wikipedia
+  summary retry, arXiv 404 degradation, citations/history və bütün mənbələrin
+  uğursuzluğunda LLM çağırılmamasını yoxlayır.
+- Tam repository suite: **228 passed, 1 failed**. Qalan uğursuz test
+  `tests/test_config.py::test_missing_database_url_raises`-dır: A config
+  import zamanı Settings yaratdığı üçün testin raises blokuna çatmır.
+  Test gizlədilməyib və A-nın faylı bu uyğunlaşdırmada dəyişdirilməyib.
+- C kodu/scriptləri və yeni inteqrasiya testləri üçün Ruff keçib;
+  C-nin 7 moduluna mypy yoxlaması keçib. Yeni coverage faizi ölçülməyib;
+  yuxarıdakı 99% əvvəlki mərhələnin nəticəsidir.
+- B synthesis servisi tətbiq teardown-unda `shutdown()` tələb edir.
+  ROLE_C composition nümunəsi iki ayrı B servisi və bu ownership ilə yenilənib.
+- Qalan iş: D-nin tam application lifecycle-ı, A config problemi və real
+  DB/API/Docker yoxlamaları. B factory-sində pacing default olaraq söndürülüb;
+  production/live benchmark üçün interval ayrıca verilməlidir.
+
+## Son yoxlama: A düzəlişindən sonra (2026-09-18)
+
+- Son `main` (`7f10a7b`) lokal inteqrasiya branch-inə fast-forward edilib.
+  A Settings-i lazy `get_settings()` ilə yükləyir; əvvəlki config import
+  uğursuzluğu həll edilib. C adapterləri Settings və pool yaratmadığından
+  onların kodunda əlavə dəyişiklik tələb olunmayıb.
+- **Tam offline suite: 231 passed**, uğursuz test yoxdur. Bu sayın **136-sı
+  C testidir**, o cümlədən 20 A/B/C/D müqavilə uyğunluğu testi.
+- C modulları/scriptləri və yeni testlər üçün Ruff, C-nin 7 modulu üçün
+  mypy keçib. `git diff --check` keçib. Real DB/API/Docker yoxlaması deyil.
+- Yuxarıdakı 228 passed / 1 failed yalnız `386f3d4` üzərində əvvəlki
+  yoxlamanın tarixi nəticəsidir. Cari config blokeri qalmayıb.
+- Tətbiq startup-ı `get_settings()` çağırmalı, lifecycle sonunda B synthesis
+  servisini, HTTP client-i və A pool-unu sahiblik qaydasına uyğun bağlamalıdır.
+  D-nin main-ə daxil olmayan işləri və canlı sistem yoxlamaları ayrıca qalır.
