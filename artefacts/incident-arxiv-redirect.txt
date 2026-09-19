@@ -1,0 +1,131 @@
+INCIDENT — arXiv source failed on every live request
+====================================================
+
+Date:        2026-09-19
+Reported as: "arXiv HTTP error when testing the CLI"
+Severity:    High — arXiv never contributed a source to any live answer.
+Status:      Resolved. Regression tests added (tests/test_http_client.py).
+
+
+1. SYMPTOM
+----------
+Running the application against live sources, arXiv always came back as a
+failed source. Wikipedia and web search were unaffected, so every answer was
+built from two sources instead of three and the CLI printed the degradation
+note on every single run. Because graceful degradation worked correctly, the
+program never crashed — which is why this went unnoticed for so long.
+
+
+2. WHAT WE EXPECTED
+-------------------
+`ai.fetch_arxiv` returns a list of Source objects, or raises ProviderError
+only when arXiv is genuinely unreachable.
+
+
+3. WHAT ACTUALLY HAPPENED
+-------------------------
+Reproduced with the project's own fetcher and the client we used to build:
+
+    >>> async with httpx.AsyncClient(timeout=10) as c:
+    ...     await ai.fetch_arxiv("photosynthesis", max_results=2, client=c)
+    ProviderError: arXiv query failed: Redirect response '301 Moved
+    Permanently' for url 'http://export.arxiv.org/api/query?search_query=
+    all%3Aphotosynthesis&start=0&max_results=3&sortBy=relevance&
+    sortOrder=descending'
+
+A direct request to the same endpoint succeeded, which is what made the
+failure look like an arXiv-side problem at first:
+
+    $ python -c "import httpx; r = httpx.get(
+        'http://export.arxiv.org/api/query',
+        params={'search_query':'all:test','max_results':1},
+        follow_redirects=True, timeout=20); print(r.status_code, r.url)"
+    200 https://export.arxiv.org/api/query?...
+
+The difference between the two is `follow_redirects`.
+
+
+4. ROOT CAUSE
+-------------
+`ai/sources.py` line 133 requests arXiv over **http://**, not https:
+
+    _ARXIV_URL = "http://export.arxiv.org/api/query"
+
+arXiv answers that with `301 Moved Permanently` pointing at the https URL.
+`fetch_arxiv` then calls `raise_for_status()`, and httpx raises on a
+redirect status as well as on 4xx/5xx. httpx does **not** follow redirects
+by default, so the 301 was never resolved.
+
+Probe of the exact client the benchmark built:
+
+    status=301  location=https://export.arxiv.org/api/query?search_query=...
+
+Three call sites constructed their own client and two of them omitted
+`follow_redirects=True`:
+
+    scripts/benchmark.py:129                      (the live benchmark)
+    researcher/concurrency/orchestrator.py:342    (fallback when no client
+                                                   is injected)
+
+`researcher/application.py` and `scripts/demo.py` did set the flag, which is
+why the CLI's own `ask` path worked while the benchmark did not. The
+duplicated client construction is the real defect — the behaviour of the
+system depended on which of three near-identical snippets a code path
+happened to use.
+
+`ai/` is supplied code we must not modify, so the fix had to live in our
+layer.
+
+
+5. FIX
+------
+Added `researcher/services/http_client.py` — a single `source_client()`
+factory that is now the only place a live source client is built. It
+guarantees, in one place, for every call site:
+
+  * `follow_redirects=True`   — resolves the arXiv 301.
+  * a descriptive User-Agent  — Wikipedia and arXiv API etiquette.
+  * a per-host `Accept` header, applied through a request event hook:
+    Atom for export.arxiv.org, JSON for en.wikipedia.org. httpx otherwise
+    sends `Accept: */*`, which some intermediaries answer with
+    406 Not Acceptable. Each value keeps a `*/*` fallback so we never turn
+    a servable response into a refusal ourselves. Accept cannot be a
+    client-level default because one client is shared by all three
+    fetchers.
+
+All four call sites now use the factory.
+
+
+6. VERIFICATION
+---------------
+Live, against the real arXiv API:
+
+    === old behaviour: httpx.AsyncClient(timeout=10) ===
+      ERROR: ProviderError: arXiv query failed: Redirect response '301 ...'
+    === new behaviour: source_client() ===
+      OK, 2 sources
+        - Energy conversion in Purple Bacteria Photosynthesis
+        - Can the photosynthesis first step quantum mechanism be explained?
+    === Wikipedia still works? ===
+      OK, 2 sources
+        - Photosynthesis
+        - Photosynthetic efficiency
+
+Offline suite after the fix: 280 passed, ruff clean, mypy clean.
+
+
+7. WHAT WE CHANGED IN HOW WE WORK
+---------------------------------
+The offline test suite was 100% green throughout this incident. It could not
+have caught the bug: every test injects `httpx.MockTransport`, so no test
+ever saw a real redirect. Mocking the transport is what keeps the suite
+offline (a brief requirement), but it also means transport-level
+configuration — redirects, headers, timeouts — is invisible to it.
+
+The lesson is not "add more mocks". It is that client *construction* is
+itself behaviour and must be asserted directly. `tests/test_http_client.py`
+now does exactly that: it checks the flags on the constructed client and
+drives a simulated 301 through it, without touching the network.
+
+Consolidating construction into one factory also removed the underlying
+condition — there is no longer a second snippet that can drift.

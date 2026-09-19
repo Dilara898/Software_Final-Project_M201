@@ -29,4 +29,6 @@ def get_settings() -> Settings:
     beləliklə `import researcher.config` özü, .env mövcud olmasa belə,
     artıq uğursuz olmur; xəta yalnız settings faktiki lazım olanda çıxır.
     """
-    return Settings()
+    # `database_url` is supplied by the environment/.env at runtime;
+    # mypy only sees the class signature, hence the narrow ignore.
+    return Settings()  # type: ignore[call-arg]

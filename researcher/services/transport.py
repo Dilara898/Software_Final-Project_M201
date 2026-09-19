@@ -121,4 +121,6 @@ def wikipedia_retrying_client(
             max_wait_seconds=max_wait_seconds,
         ),
         headers=client.headers,
+        # Duck-typed clients in tests may not define it; live ones always do.
+        follow_redirects=getattr(client, "follow_redirects", True),
     )

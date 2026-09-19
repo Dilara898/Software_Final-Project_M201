@@ -1,20 +1,15 @@
-import pytest
-from ai.schemas import Source
+"""Shared fixtures for Topic 4 smoke tests."""
+
+from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from ai.providers.base import LLMProvider
 from ai.sources import WebSearchProvider
+from ai.schemas import Source
 
-
-@pytest.fixture
-def sample_source():
-    return Source(
-        title="Test Title",
-        url="http://example.com",
-        snippet="Test snippet",
-        origin="wikipedia",
-    )
 
 class FakeLLM(LLMProvider):
     """Returns a fixed text response. Records calls for inspection."""
@@ -91,3 +86,22 @@ def sample_sources() -> list[Source]:
             origin="wikipedia",
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Team additions below this line. Everything above is the course-supplied
+# conftest.py, byte for byte: the smoke tests in tests/test_ai_smoke.py are a
+# grading contract and depend on the fixtures above, so they are never edited
+# or reordered. Our own fixtures are appended, never interleaved.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sample_source() -> Source:
+    """Minimal Source used by our storage/cache and AI-service tests."""
+    return Source(
+        title="Test Title",
+        url="http://example.com",
+        snippet="Test snippet",
+        origin="wikipedia",
+    )
