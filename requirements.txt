@@ -1,10 +1,28 @@
-streamlit
-httpx
-pydantic
-numpy
-pydantic-settings
-asyncpg
-google-generativeai
-google-genai
-tenacity
-python-dotenv
+# Every dependency is pinned: an unpinned line means a future release can
+# silently change behaviour or break the build. Versions below are the ones
+# the test suite is verified against.
+
+# Runtime
+httpx==0.28.1
+pydantic==2.12.3
+pydantic-settings==2.12.0
+numpy==2.3.4
+asyncpg==0.31.0
+tenacity==9.1.4
+python-dotenv==1.2.1
+
+# LLM provider SDK. ai/providers/google.py imports `from google import genai`,
+# which is the `google-genai` package -- NOT the deprecated
+# `google-generativeai`, which nothing in this project imports.
+google-genai==1.56.0
+
+# Streamlit UI (researcher/ui.py)
+streamlit==1.64.0
+
+# Test and lint tooling. Kept here so a clean install -- and the Docker
+# image -- can run the suite without a second requirements file.
+pytest==8.4.2
+pytest-asyncio==1.2.0
+pytest-cov==7.0.0
+ruff==0.14.0
+mypy==1.18.2

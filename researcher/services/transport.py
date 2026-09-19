@@ -78,6 +78,21 @@ class _RetryingTransport(httpx.AsyncBaseTransport):
                 if response.status_code < 400 or not _is_transient_status(
                     response.status_code
                 ):
+                    if response.status_code >= 400:
+                        # `fetch_wikipedia` swallows a failed per-title summary
+                        # request with a bare `except Exception: continue`, so a
+                        # permanent rejection (403 from Wikimedia's UA policy,
+                        # 404 for a missing page) otherwise reaches nobody: the
+                        # source just returns fewer -- or zero -- results and
+                        # looks like a successful empty search. This is the only
+                        # layer that still sees the status, so it is logged here.
+                        log.warning(
+                            "wikipedia_request_rejected",
+                            extra={
+                                "status_code": response.status_code,
+                                "path": request.url.path,
+                            },
+                        )
                     return response
                 await response.aclose()
                 if attempt >= self._max_attempts:
