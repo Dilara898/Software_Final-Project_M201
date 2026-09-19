@@ -1,0 +1,20 @@
+Mode: LIVE
+Question ID: q3
+Sources: web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: What were the main causes of the 2008 financial crisis?
+
+The 2008 financial crisis was primarily triggered by the collapse of the U.S. housing market and a banking crisis rooted in subprime mortgage lending [1, 2, 3]. The preceding housing boom was driven by loose credit, general exuberance, and excessive speculation on property values by both homeowners and financial institutions [1, 3]. Predatory lending for sub
+
+References:
+[1] (web) 2008 financial crisis
+https://en.wikipedia.org/wiki/2008_financial_crisis
+[2] (web) What Caused the Great Recession of 2008? Explained
+https://www.acorns.com/learn/investing/what-caused-great-recession-of-2008
+[3] (web) Origins of the Crisis
+https://www.fdic.gov/media/18636
+History: saved
+Session: 9
+3 documents; 1 providers; total 12.69 seconds; answer ready 12.61 seconds; cache: 0 hits, 1 misses, 0 bypasses; 0 read errors, 0 write errors
