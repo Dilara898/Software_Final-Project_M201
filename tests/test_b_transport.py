@@ -129,3 +129,49 @@ class TestWikipediaRetryingClient:
 
         assert result == []  # exhausted -> fetch_wikipedia's continue applies
         assert calls["summary"] == 3  # exactly max_attempts, not more
+
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_preserves_user_agent_on_search_and_retry():
+    expected_agent = "ResearchAssistant-Test/1.0"
+    seen_agents = []
+    summary_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal summary_calls
+        seen_agents.append(request.headers.get("user-agent"))
+
+        if request.url.params.get("action") == "opensearch":
+            return _search_response(["Photosynthesis"])
+
+        summary_calls += 1
+        if summary_calls == 1:
+            return httpx.Response(503, text="temporary failure")
+
+        return _summary_response("Photosynthesis")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        headers={"User-Agent": expected_agent},
+    ) as base_client:
+        wrapped = wikipedia_retrying_client(
+            base_client,
+            max_attempts=2,
+            initial_wait_seconds=0.01,
+            max_wait_seconds=0.01,
+        )
+        try:
+            result = await fetch_wikipedia(
+                "photosynthesis",
+                max_results=1,
+                client=wrapped,
+            )
+        finally:
+            await wrapped.aclose()
+
+        assert not base_client.is_closed
+
+    assert len(result) == 1
+    assert summary_calls == 2
+    assert seen_agents == [expected_agent] * 3

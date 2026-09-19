@@ -77,7 +77,14 @@ async def test_source_timeout_preserves_fast_results_and_cancels_slow_task():
 
     service = AsyncMock()
     service.fetch.side_effect = fetch
-    result = await asyncio.wait_for(make(service, timeout_seconds=0.03).collect("q"), 1)
+    transport = httpx.MockTransport(
+        lambda request: pytest.fail("Unexpected HTTP request")
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await asyncio.wait_for(
+            make(service, timeout_seconds=0.03, client=client).collect("q"),
+            1,
+        )
     assert result.used == ["wikipedia", "web"]
     assert result.failed == ["arxiv"]
     assert result.outcomes[1].status == "timeout"

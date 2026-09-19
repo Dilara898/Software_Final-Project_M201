@@ -1,0 +1,34 @@
+{
+  "mode": "LIVE",
+  "started_utc": "20260919T093055786500Z",
+  "provider": "gemini",
+  "model": "gemini-3.6-flash",
+  "sources": "web",
+  "use_cache": true,
+  "expected_sources_policy": "metadata only, not a filter",
+  "status": "completed",
+  "total": 5,
+  "failed": 0,
+  "results": [
+    {
+      "id": "q1",
+      "status": "completed"
+    },
+    {
+      "id": "q2",
+      "status": "completed"
+    },
+    {
+      "id": "q3",
+      "status": "completed"
+    },
+    {
+      "id": "q4",
+      "status": "completed"
+    },
+    {
+      "id": "q5",
+      "status": "completed"
+    }
+  ]
+}

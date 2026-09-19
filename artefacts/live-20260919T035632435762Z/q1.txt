@@ -1,0 +1,16 @@
+Mode: LIVE
+Question ID: q1
+Sources: web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: What is photosynthesis and what are its main stages?
+
+Photosynthesis is a vital process that transforms light energy into a usable chemical form, supporting life on Earth [1]. It consists of two main stages: light-dependent reactions and light-independent reactions, which
+
+References:
+[1] (web) Breaking down photosynthesis stages (video) | Khan Academy
+https://www.khanacademy.org/science/ap-biology/cellular-energetics/photosynthesis/v/breaking-down-photosynthesis-stages
+History: saved
+Session: 7
+3 documents; 1 providers; total 11.40 seconds; answer ready 11.29 seconds; cache: 0 hits, 1 misses, 0 bypasses; 0 read errors, 0 write errors

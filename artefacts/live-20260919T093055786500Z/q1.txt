@@ -1,0 +1,20 @@
+Mode: LIVE
+Question ID: q1
+Sources: web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: What is photosynthesis and what are its main stages?
+
+Photosynthesis is a vital process that transforms light energy into a usable form to support life on Earth [1]. It consists of two major stages: light-dependent reactions and light-independent reactions, which are also called the Calvin cycle [1, 2, 3]. In the light-dependent stage, which takes place in the thylakoid membrane, chlorophyll absorbs sunlight to convert light energy and water into oxygen, ATP, and NADPH [1, 2, 3]. During the light-independent stage, the plant uses the generated ATP and NADPH alongside carbon dioxide to capture and reduce carbon dioxide to create sugar [1, 3].
+
+References:
+[1] (web) Breaking down photosynthesis stages (video)
+https://www.khanacademy.org/science/ap-biology/cellular-energetics/photosynthesis/v/breaking-down-photosynthesis-stages
+[2] (web) Photosynthesis
+https://education.nationalgeographic.org/resource/photosynthesis
+[3] (web) Photosynthesis
+https://en.wikipedia.org/wiki/Photosynthesis
+History: saved
+Session: 4
+3 documents; 1 providers; total 16.73 seconds; answer ready 16.72 seconds; cache: 0 hits, 1 misses, 0 bypasses; 0 read errors, 0 write errors
