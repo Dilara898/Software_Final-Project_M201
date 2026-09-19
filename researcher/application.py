@@ -109,8 +109,12 @@ def render_answer(result) -> str:
     return clean("\n".join(lines))
 
 
-async def execute_ask(args, settings, pool, client, fetch, synthesis):
-    """Connect injected services using C's existing adapters."""
+async def build_result(args, settings, pool, client, fetch, synthesis):
+    """Run the research workflow and return the raw `ResearchResult`.
+
+    Shared by `execute_ask` (CLI) and `run_research` (UI) so both present
+    the same underlying pipeline instead of two parallel implementations.
+    """
     wanted = sources_from_cli(args.sources)
 
     cache = StorageCacheAdapter(
@@ -141,12 +145,16 @@ async def execute_ask(args, settings, pool, client, fetch, synthesis):
         ),
     )
 
-    result = await workflow.research(
+    return await workflow.research(
         args.question,
         wanted,
         use_cache=not args.no_cache,
     )
 
+
+async def execute_ask(args, settings, pool, client, fetch, synthesis):
+    """Connect injected services using C's existing adapters."""
+    result = await build_result(args, settings, pool, client, fetch, synthesis)
     print(render_answer(result))
     return 0
 
@@ -228,3 +236,62 @@ async def run_ask(args) -> int:
                 "Database cleanup failed (%s)",
                 type(exc).__name__,
             )
+
+
+async def run_research(args):
+    """Own resources and release them, returning the raw `ResearchResult`.
+
+    Same resource lifecycle as `run_ask`, but for callers that render their
+    own presentation instead of printing to stdout/stderr and returning a
+    process exit code -- namely the Streamlit UI in `researcher/ui.py`.
+    Every exception propagates uncaught so each caller maps it to its own
+    presentation, exactly like `researcher.cli.main()` does around `run_ask`.
+    """
+    from researcher.config import get_settings
+    from researcher.storage.db import close_pool, get_pool
+
+    synthesis = None
+    client = None
+
+    try:
+        settings = get_settings()
+        pool = await asyncio.wait_for(get_pool(), timeout=10)
+
+        synthesis = AISynthesisService()
+        budget = settings.per_source_timeout_seconds
+
+        fetch = AIFetchService(
+            max_results=settings.max_sources_per_query,
+            timeout_seconds=budget / 4,
+            initial_wait_seconds=budget / 40,
+            max_wait_seconds=budget / 20,
+            min_interval_seconds=1.0,
+        )
+
+        client = httpx.AsyncClient(
+            timeout=budget,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "AsyncResearchAssistant/1.0 (AI-ENG-110 student project; contact: https://github.com/Dilara898/Software_Final-Project_M201)"
+            },
+        )
+
+        return await build_result(args, settings, pool, client, fetch, synthesis)
+
+    finally:
+        if synthesis is not None:
+            try:
+                synthesis.shutdown()
+            except Exception as exc:
+                log.warning("Synthesis cleanup failed (%s)", type(exc).__name__)
+
+        if client is not None:
+            try:
+                await asyncio.wait_for(client.aclose(), timeout=5)
+            except Exception as exc:
+                log.warning("HTTP cleanup failed (%s)", type(exc).__name__)
+
+        try:
+            await asyncio.wait_for(close_pool(), timeout=5)
+        except Exception as exc:
+            log.warning("Database cleanup failed (%s)", type(exc).__name__)
