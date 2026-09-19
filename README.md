@@ -179,6 +179,4 @@ subcommand works the same way inside the container as it does locally.
 
 ## Tools & Acknowledgements
 
-Substantial portions of the SE layer (service wrappers, concurrency
-orchestration, the Streamlit UI, and this README) were developed with AI
-assistance (Claude). All code was reviewed and is understood by the team.
+AI was used as a development assistant across the SE layer to support code generation, debug issues (such as deployment-time failures), boost test coverage, and draft documentation. Every piece of AI-assisted code and documentation was thoroughly reviewed, tested, and validated by the team prior to committing.
