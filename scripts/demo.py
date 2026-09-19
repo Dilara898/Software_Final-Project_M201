@@ -29,6 +29,7 @@ from researcher.concurrency.research import OrchestrationError
 from researcher.config import get_settings
 from researcher.exceptions import ResearcherError
 from researcher.services.ai_service import AIFetchService, AISynthesisService
+from researcher.services.http_client import source_client
 from researcher.services.logging_setup import configure_logging
 from researcher.storage.db import close_pool, get_pool
 from researcher.validation import validate_question
@@ -108,17 +109,7 @@ async def run_questions(questions, args, output_dir):
             min_interval_seconds=1.0,
         )
 
-        client = httpx.AsyncClient(
-            timeout=budget,
-            follow_redirects=True,
-            headers={
-                "User-Agent": (
-                    "AsyncResearchAssistant/1.0 "
-                    "(AI-ENG-110 student project; contact: "
-                    "https://github.com/Dilara898/Software_Final-Project_M201)"
-                )
-            },
-        )
+        client = source_client(timeout_seconds=budget)
 
         for item in questions:
             question_id = item["id"]

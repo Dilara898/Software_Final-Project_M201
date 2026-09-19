@@ -141,16 +141,20 @@ def test_live_cli_passes_selected_timeout_to_http_client(monkeypatch, tmp_path, 
 
     service.fetch.side_effect = fetch
     monkeypatch.setattr(benchmark, "load_factory", lambda spec: lambda: service)
-    original = httpx.AsyncClient
+    original = benchmark.source_client
 
-    def offline_transport_client(*args, **kwargs):
-        return original(
-            *args,
+    def offline_transport_client(**kwargs):
+        # Live benchmarking must reach arXiv, whose http:// URL 301s to https;
+        # the shared factory is what guarantees that, so assert it here rather
+        # than rebuilding a bare client the way this call site used to.
+        client = original(
             **kwargs,
             transport=httpx.MockTransport(lambda r: httpx.Response(200)),
         )
+        assert client.follow_redirects is True
+        return client
 
-    monkeypatch.setattr(benchmark.httpx, "AsyncClient", offline_transport_client)
+    monkeypatch.setattr(benchmark, "source_client", offline_transport_client)
     assert (
         benchmark.main(
             [
