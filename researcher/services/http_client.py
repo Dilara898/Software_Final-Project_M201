@@ -4,21 +4,25 @@
 assumptions the SE layer has to satisfy from the outside:
 
 1. It requests arXiv over ``http://export.arxiv.org/api/query``. arXiv
-   answers with a 301 to the https URL, and `fetch_arxiv` then calls
+   may answer with a redirect to HTTPS, and `fetch_arxiv` then calls
    `raise_for_status()` -- which in httpx raises on a redirect as well as
    on 4xx/5xx. A client built without ``follow_redirects=True`` turns
-   every arXiv call into ``ProviderError: arXiv query failed`` before any
+   a redirected arXiv call into ``ProviderError: arXiv query failed`` before any
    Atom is parsed. Three separate call sites used to build their own
    client and two of them omitted the flag, so the live benchmark and the
    orchestrator's own fallback client could never reach arXiv at all.
 
-2. It issues `client.get(...)` itself, so the only way to negotiate
+   The request hook now upgrades this exact public API endpoint before
+   sending it, avoiding an unnecessary HTTP hop. Other redirects remain
+   supported; no supplied ai/ code is modified.
+
+2. It issues `client.get(...)` itself, so one way to negotiate
    content per source is to reach the request after it is built. httpx
-   otherwise sends ``Accept: */*``, which some intermediaries answer with
-   406 Not Acceptable. Declaring what each host actually serves -- Atom
-   for arXiv, JSON for Wikipedia -- removes that failure mode; every value
-   keeps a ``*/*`` fallback so we never turn a servable response into a
-   refusal ourselves.
+   otherwise sends ``Accept: */*``. Declaring Atom for arXiv and JSON for
+   Wikipedia makes the expected representation explicit. This does NOT
+   establish the cause of a live 406 or guarantee its resolution: proxies
+   and upstream policy can also reject requests. A persistent 406 must
+   remain visible as a source failure, not be converted into empty success.
 
 Because one client is shared across all three fetchers, Accept cannot be a
 client-level default: arXiv's Atom would then be sent to Wikipedia's JSON
@@ -57,7 +61,14 @@ def accept_for_host(host: str) -> str | None:
 
 
 async def set_source_accept_header(request: httpx.Request) -> None:
-    """Request event hook: declare what this host is known to serve."""
+    """Use HTTPS for the supplied arXiv API URL and set host-specific Accept."""
+    if (
+        request.url.scheme == "http"
+        and request.url.host == "export.arxiv.org"
+        and request.url.path == "/api/query"
+        and request.url.port in (None, 80)
+    ):
+        request.url = request.url.copy_with(scheme="https", port=None)
     accept = accept_for_host(request.url.host)
     if accept is not None:
         request.headers["Accept"] = accept
