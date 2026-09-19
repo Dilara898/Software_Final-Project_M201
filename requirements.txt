@@ -5,5 +5,6 @@ numpy
 pydantic-settings
 asyncpg
 google-generativeai
+google-genai
 tenacity
 python-dotenv
