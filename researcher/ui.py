@@ -7,23 +7,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ai.providers.base import ProviderError
 """Streamlit UI for the Async Research Assistant.
-
-Reuses the exact same business logic the CLI uses -- `researcher.application
-.run_research` calls the same `build_result` pipeline as `researcher.cli`'s
-`ask` command (A's storage adapters, B's retrying AI services, C's
-concurrent orchestrators) -- so this is a second presentation of one
-pipeline, not a parallel implementation.
-
-Visual design follows the project's editorial/technical design system
-(warm-neutral palette, Instrument Sans + JetBrains Mono, restrained
-monochrome with color reserved for genuine errors). Most of that system is
-declared in `.streamlit/config.toml` via Streamlit's native theming API;
-`inject_theme()` below covers the handful of things that API can't express
-(the dotted background grid, and small presentational components -- tags,
-section headers, fact pills -- for content this module renders itself).
-
-Run with:
-    streamlit run researcher/ui.py
 """
 
 
