@@ -1,3 +1,8 @@
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 """Streamlit UI for the Async Research Assistant.
 
 Reuses the exact same business logic the CLI uses -- `researcher.application
