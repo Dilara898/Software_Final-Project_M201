@@ -1,3 +1,11 @@
+from __future__ import annotations
+
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ai.providers.base import ProviderError
 """Streamlit UI for the Async Research Assistant.
 
 Reuses the exact same business logic the CLI uses -- `researcher.application
@@ -18,17 +26,28 @@ Run with:
     streamlit run researcher/ui.py
 """
 
-from __future__ import annotations
+
 
 import asyncio
 import logging
-import os
 from types import SimpleNamespace
 
 import asyncpg
 import streamlit as st
 from dotenv import load_dotenv
 from pydantic import ValidationError as SettingsError
+
+# On Streamlit Community Cloud (or any host using st.secrets instead of a
+# .env file), secrets configured in the platform's UI land in `st.secrets`,
+# not in the process environment -- but every other module in this project
+# (pydantic-settings, os.getenv) only ever reads os.environ. Bridge the two
+# before anything else runs. Locally, with no secrets.toml configured, this
+# is a silent no-op and .env (below) is the only source, unchanged.
+try:
+    for _key, _value in st.secrets.items():
+        os.environ.setdefault(_key, str(_value))
+except Exception:  # noqa: BLE001 - no secrets.toml configured; nothing to bridge
+    pass
 
 # One-time process bootstrap, mirroring researcher.cli.main()'s own setup:
 # existing process environment values take priority over .env, and empty
