@@ -6,7 +6,6 @@ import re
 import sys
 
 import asyncpg
-import httpx
 
 from researcher.concurrency.integration import (
     SessionHistoryAdapter,
@@ -16,6 +15,7 @@ from researcher.concurrency.integration import (
 from researcher.concurrency.orchestrator import SourceOrchestrator
 from researcher.concurrency.research import ResearchOrchestrator
 from researcher.services.ai_service import AIFetchService, AISynthesisService
+from researcher.services.http_client import source_client
 from researcher.storage.cache_store import PostgresCacheStore, cache_key
 
 log = logging.getLogger(__name__)
@@ -175,13 +175,7 @@ async def run_ask(args) -> int:
             min_interval_seconds=1.0,
         )
 
-        client = httpx.AsyncClient(
-            timeout=budget,
-            follow_redirects=True,
-            headers={
-                "User-Agent": "AsyncResearchAssistant/1.0 (AI-ENG-110 student project; contact: https://github.com/Dilara898/Software_Final-Project_M201)"
-            },
-        )
+        client = source_client(timeout_seconds=budget)
 
         return await execute_ask(
             args,

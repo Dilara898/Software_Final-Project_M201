@@ -17,8 +17,13 @@ services:
 
   app:
     build: .
+    # Optional: a clean clone has no .env (it is gitignored). Without
+    # `required: false` compose aborts before the container starts, so
+    # `docker compose run --rm app ...` would fail on a fresh checkout.
+    # Copy .env.example to .env to supply real provider keys.
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://researcher:researcher@db:5432/researcher
     depends_on:

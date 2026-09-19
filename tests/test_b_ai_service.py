@@ -184,7 +184,10 @@ class TestAIFetchService:
 
     @pytest.mark.asyncio
     async def test_no_secret_text_reaches_logs(self, monkeypatch, caplog):
-        secret = "sk-live-SUPER-SECRET-VALUE"
+        # Fake, secret-SHAPED fixture -- never a real credential. The
+        # test asserts this exact text is redacted before it reaches a
+        # log record, so it has to look like a key to be meaningful.
+        secret = "sk-test-FAKE-CREDENTIAL-DO-NOT-USE"
 
         async def always_fails(query, *, max_results, client):
             raise ProviderError(f"upstream said: {secret}")
@@ -621,7 +624,10 @@ class TestAISynthesisService:
 
     @pytest.mark.asyncio
     async def test_no_secret_text_reaches_logs(self, monkeypatch, caplog):
-        secret = "sk-live-SUPER-SECRET-VALUE"
+        # Fake, secret-SHAPED fixture -- never a real credential. The
+        # test asserts this exact text is redacted before it reaches a
+        # log record, so it has to look like a key to be meaningful.
+        secret = "sk-test-FAKE-CREDENTIAL-DO-NOT-USE"
 
         def always_fails(q, s, *, llm=None):
             raise ProviderError(f"upstream said: {secret}")

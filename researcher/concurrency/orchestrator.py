@@ -14,6 +14,7 @@ import httpx
 
 from ai.providers.base import ProviderError
 from ai.schemas import Source
+from researcher.services.http_client import source_client
 from researcher.concurrency.contracts import (
     Cache,
     FetchService,
@@ -339,5 +340,5 @@ class SourceOrchestrator:
 
         if self._client is not None:
             return await run(self._client)
-        async with httpx.AsyncClient(timeout=self._timeout) as owned_client:
+        async with source_client(timeout_seconds=self._timeout) as owned_client:
             return await run(owned_client)

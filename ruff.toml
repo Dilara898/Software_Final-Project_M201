@@ -1,0 +1,14 @@
+# Repository-wide lint settings.
+#
+# Two files are exempt, both for reasons that cannot be fixed in place:
+#
+#   tests/test_ai_smoke.py  supplied by the course as a contract; the brief
+#                           forbids modifying or weakening it, so its unused
+#                           import stays exactly as shipped.
+#   scripts/demo.py         must insert the project root on sys.path before
+#                           importing `researcher`/`ai`, so its imports are
+#                           deliberately not at the top of the file.
+
+[lint.per-file-ignores]
+"tests/test_ai_smoke.py" = ["F401"]
+"scripts/demo.py" = ["E402"]
