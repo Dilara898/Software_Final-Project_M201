@@ -1,3 +1,4 @@
+# ruff: noqa: E402 -- direct script execution requires repository path bootstrap
 """Run research questions through the application's existing ask workflow."""
 
 import argparse
