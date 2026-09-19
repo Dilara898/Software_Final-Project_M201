@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from ai.providers.base import ProviderError
 """Streamlit UI for the Async Research Assistant.
 
 Reuses the exact same business logic the CLI uses -- `researcher.application
