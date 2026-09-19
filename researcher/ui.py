@@ -290,7 +290,7 @@ def render_error(exc: Exception) -> None:
     # Never surface str(exc) directly: provider/DB errors can embed secrets
     # (API keys, connection strings). Only the exception type is logged,
     # matching researcher.cli.main()'s own discipline.
-    log.error("UI request failed (%s)", type(exc).__name__)
+    log.error("UI request failed (%s)", type(exc).__name__, exc_info=True)
 
     if isinstance(exc, ValidationError):
         st.error(str(exc))
