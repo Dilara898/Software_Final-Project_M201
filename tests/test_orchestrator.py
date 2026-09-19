@@ -227,7 +227,7 @@ async def test_unexpected_error_cleans_up_siblings_before_closing_client(monkeyp
     with pytest.raises(TypeError, match="programming bug"):
         # This is a hang watchdog, not a latency assertion. Source expiry must
         # not race the deliberately triggered programmer error.
-        await asyncio.wait_for(make(service, timeout_seconds=30).collect("q"), 5)
+        await asyncio.wait_for(make(service, timeout_seconds=10).collect("q"), 5)
     assert stopped == started == {"arxiv", "web"}
     assert len(clients) == 3
     assert all(client.is_closed for client in clients)
@@ -255,7 +255,7 @@ async def test_caller_cancellation_is_propagated(monkeypatch):
 
     service = AsyncMock()
     service.fetch.side_effect = fetch
-    task = asyncio.create_task(make(service, timeout_seconds=30).collect("q", ["web"]))
+    task = asyncio.create_task(make(service, timeout_seconds=10).collect("q", ["web"]))
     try:
         await asyncio.wait_for(entered.wait(), 5)
         task.cancel()
