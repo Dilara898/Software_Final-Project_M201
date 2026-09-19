@@ -98,7 +98,7 @@ class SourceOrchestrator:
         cache: Cache | None = None,
         cache_key: Callable[[str, str], str] | None = None,
         queue_timeout_seconds: float = 10,
-        cache_timeout_seconds: float = 0.5,
+        cache_timeout_seconds: float = 3.0,
         max_results_per_source: int = 3,
     ) -> None:
         self._timeout = positive_seconds(timeout_seconds, "timeout_seconds")
