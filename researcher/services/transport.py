@@ -119,5 +119,6 @@ def wikipedia_retrying_client(
             max_attempts=max_attempts,
             initial_wait_seconds=initial_wait_seconds,
             max_wait_seconds=max_wait_seconds,
-        )
+        ),
+        headers=client.headers,
     )

@@ -4,6 +4,7 @@ no network).
 """
 
 from __future__ import annotations
+from types import SimpleNamespace
 
 import asyncio
 import logging
@@ -49,7 +50,7 @@ class TestAIFetchService:
 
         monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", fake_wikipedia)
         service = AIFetchService()
-        result = await service.fetch("wikipedia", "q", client=object())
+        result = await service.fetch("wikipedia", "q", client=SimpleNamespace(headers={}))
         assert calls == ["wikipedia"]
         assert result[0].origin == "wikipedia"
 
@@ -103,7 +104,12 @@ class TestAIFetchService:
         )
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(
-                service.fetch("wikipedia", "q", client=object()), timeout=2
+                service.fetch(
+                    "wikipedia",
+                    "q",
+                    client=SimpleNamespace(headers={}),
+                ),
+                timeout=2,
             )
 
     @pytest.mark.asyncio

@@ -111,6 +111,13 @@ async def run_questions(questions, args, output_dir):
         client = httpx.AsyncClient(
             timeout=budget,
             follow_redirects=True,
+            headers={
+                "User-Agent": (
+                    "AsyncResearchAssistant/1.0 "
+                    "(AI-ENG-110 student project; contact: "
+                    "https://github.com/Dilara898/Software_Final-Project_M201)"
+                )
+            },
         )
 
         for item in questions:
