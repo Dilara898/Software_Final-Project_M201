@@ -172,11 +172,15 @@ async def run_ask(args) -> int:
             timeout_seconds=budget / 4,
             initial_wait_seconds=budget / 40,
             max_wait_seconds=budget / 20,
+            min_interval_seconds=1.0,
         )
 
         client = httpx.AsyncClient(
             timeout=budget,
             follow_redirects=True,
+            headers={
+                "User-Agent": "AsyncResearchAssistant/1.0 (AI-ENG-110 student project; contact: https://github.com/Dilara898/Software_Final-Project_M201)"
+            },
         )
 
         return await execute_ask(

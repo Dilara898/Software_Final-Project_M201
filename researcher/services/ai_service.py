@@ -296,6 +296,26 @@ class _BoundedThreadRunner:
         """Stop accepting new work; does not wait for a running thread."""
         self._executor.shutdown(wait=False, cancel_futures=True)
 
+class TokenBudgetLLM(LLMProvider):
+    """Set a larger token budget through the provided LLM interface."""
+
+    def __init__(self, provider: LLMProvider) -> None:
+        self._provider = provider
+
+    def complete(
+        self,
+        prompt: str,
+        *,
+        json_schema: dict | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        return self._provider.complete(
+            prompt,
+            json_schema=json_schema,
+            max_tokens=max(max_tokens, 4096),
+        )
+
+
 
 class AISynthesisService:
     """Adapts `ai.synthesizer.synthesize` (a blocking LLM call) to the async
@@ -361,7 +381,7 @@ class AISynthesisService:
         last_exc: Exception | None = None
         for provider_index, factory in enumerate(self._llm_factories):
             try:
-                llm = factory()
+                llm = TokenBudgetLLM(factory())
             except ProviderError as exc:
                 last_exc = exc
                 log.warning(

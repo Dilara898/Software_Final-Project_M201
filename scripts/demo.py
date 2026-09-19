@@ -105,6 +105,7 @@ async def run_questions(questions, args, output_dir):
             timeout_seconds=budget / 4,
             initial_wait_seconds=budget / 40,
             max_wait_seconds=budget / 20,
+            min_interval_seconds=1.0,
         )
 
         client = httpx.AsyncClient(

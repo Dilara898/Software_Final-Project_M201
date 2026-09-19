@@ -435,32 +435,59 @@ class TestAISynthesisService:
         service.shutdown()
 
     @pytest.mark.asyncio
-    async def test_failover_to_second_provider_after_first_exhausts(self, monkeypatch):
+    async def test_failover_to_second_provider_after_first_exhausts(
+        self, monkeypatch
+    ):
+        from ai.providers.base import LLMProvider
+
         provider_used: list[int] = []
+        token_budgets: list[int] = []
 
-        def make_synth(fail_provider_index: int):
-            def _synth(q, s, *, llm=None):
-                idx = llm  # llm is the marker int for this fake test
-                provider_used.append(idx)
-                if idx == fail_provider_index:
-                    raise ProviderError("primary provider down: apikey=SECRET")
-                return fake_answer(q, s)
+        class FakeProvider(LLMProvider):
+            def __init__(self, index: int):
+                self.index = index
 
-            return _synth
+            def complete(
+                self,
+                prompt: str,
+                *,
+                json_schema: dict | None = None,
+                max_tokens: int = 1024,
+            ) -> str:
+                provider_used.append(self.index)
+                token_budgets.append(max_tokens)
 
-        monkeypatch.setattr(ai_service, "synthesize", make_synth(0))
+                if self.index == 0:
+                    raise ProviderError("primary provider down")
+
+                return "Supported [1]."
+
+        def fake_synthesize(q, s, *, llm=None):
+            llm.complete(q)
+            return fake_answer(q, s)
+
+        monkeypatch.setattr(ai_service, "synthesize", fake_synthesize)
+
         service = AISynthesisService(
-            llm_factories=[lambda: 0, lambda: 1],
+            llm_factories=[
+                lambda: FakeProvider(0),
+                lambda: FakeProvider(1),
+            ],
             max_attempts=2,
             initial_wait_seconds=0.01,
             max_wait_seconds=0.02,
         )
-        result = await service.synthesize("q", [sample_source("web")])
+
+        try:
+            result = await service.synthesize(
+                "q", [sample_source("web")]
+            )
+        finally:
+            service.shutdown()
+
         assert result.answer == "Supported [1]."
-        # Provider 0 tried (and retried) before falling over to provider 1.
-        assert provider_used.count(0) == 2
-        assert provider_used.count(1) == 1
-        service.shutdown()
+        assert provider_used == [0, 0, 1]
+        assert token_budgets == [4096, 4096, 4096]
 
     @pytest.mark.asyncio
     async def test_all_providers_exhausted_raises_upstream_data_error(self, monkeypatch):
