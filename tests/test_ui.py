@@ -7,6 +7,7 @@ harness, which re-executes the script -- including its top-level
 No real network/DB call is made: `run_research`, `get_pool`/`close_pool`
 and `list_sessions` are always faked.
 """
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import asyncpg
@@ -24,7 +25,11 @@ from researcher.concurrency.models import (
 )
 from researcher.exceptions import NoSourcesError
 
-UI_SCRIPT = "researcher/ui.py"
+# AppTest.from_file resolves a RELATIVE path against the file that calls
+# it -- i.e. tests/ -- not against the working directory, so a relative
+# "researcher/ui.py" is looked up as tests/researcher/ui.py and never
+# found. Anchor it to the repository root instead.
+UI_SCRIPT = str(Path(__file__).resolve().parents[1] / "researcher" / "ui.py")
 
 
 def _make_result(*, failed=(), empty=(), warnings=(), history_status="saved", session_id=5):

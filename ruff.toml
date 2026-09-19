@@ -12,3 +12,4 @@
 [lint.per-file-ignores]
 "tests/test_ai_smoke.py" = ["F401"]
 "scripts/demo.py" = ["E402"]
+"researcher/ui.py" = ["E402"]

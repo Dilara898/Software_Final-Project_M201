@@ -1,5 +1,4 @@
 """D-owned composition of A storage, B services and C research workflow."""
-import httpx
 import asyncio
 import logging
 import re
@@ -268,13 +267,10 @@ async def run_research(args):
             min_interval_seconds=1.0,
         )
 
-        client = httpx.AsyncClient(
-            timeout=budget,
-            follow_redirects=True,
-            headers={
-                "User-Agent": "AsyncResearchAssistant/1.0 (AI-ENG-110 student project; contact: https://github.com/Dilara898/Software_Final-Project_M201)"
-            },
-        )
+        # Same factory the CLI path uses. Building a client here by hand is
+        # what caused the arXiv outage in artefacts/incident-arxiv-redirect.txt:
+        # two near-identical snippets drifted apart. One factory, one behaviour.
+        client = source_client(timeout_seconds=budget)
 
         return await build_result(args, settings, pool, client, fetch, synthesis)
 
