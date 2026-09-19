@@ -9,6 +9,7 @@ and `list_sessions` are always faked.
 """
 from unittest.mock import AsyncMock
 
+import asyncpg
 from streamlit.testing.v1 import AppTest
 
 import researcher.application as application_module
@@ -123,6 +124,23 @@ def test_ask_notes_failed_and_empty_sources(monkeypatch):
 def test_ask_reports_no_sources_error_generically(monkeypatch):
     async def fake_run_research(args):
         raise NoSourcesError("no usable sources")
+
+    monkeypatch.setattr(application_module, "run_research", fake_run_research)
+
+    at = _at()
+    at.text_input[0].set_value("What is photosynthesis").run()
+    at.button[0].click().run()
+
+    assert len(at.error) == 1
+    assert "connectivity" in at.error[0].value
+
+
+def test_ask_reports_asyncpg_interface_error_as_connectivity(monkeypatch):
+    # asyncpg.InterfaceError is a sibling of PostgresError, not a subclass --
+    # regression test for a real incident where it fell through to the
+    # generic "Unexpected error" branch instead of the connectivity one.
+    async def fake_run_research(args):
+        raise asyncpg.InterfaceError("cannot perform operation: pool is closed")
 
     monkeypatch.setattr(application_module, "run_research", fake_run_research)
 
