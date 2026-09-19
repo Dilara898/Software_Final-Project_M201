@@ -26,11 +26,10 @@ Run with:
     streamlit run researcher/ui.py
 """
 
-from __future__ import annotations
+
 
 import asyncio
 import logging
-import os
 from types import SimpleNamespace
 
 import asyncpg
