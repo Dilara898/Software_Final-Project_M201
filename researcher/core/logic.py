@@ -18,6 +18,7 @@ second citation-extraction pass.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 
 from ai.schemas import AnswerWithCitations, Citation
@@ -108,9 +109,97 @@ def format_references(
     return "\n".join(f"[{c.index}] {c.source.title} -- {c.source.url}" for c in rows)
 
 
+
+
+# --- Wikipedia search terms -------------------------------------------------
+#
+# `ai.fetch_wikipedia` searches through MediaWiki's `action=opensearch`
+# endpoint, which is a title *prefix/autocomplete* API: it matches article
+# titles that begin with the search string. A full natural-language question
+# never begins an article title, so every question in data/research_questions
+# .json returns HTTP 200 with zero titles -- the summary step then never runs
+# and the fetcher returns an empty list, which is indistinguishable from "no
+# such article". Measured: all five demo questions return 0 titles, while the
+# same topics as short phrases return 3 each.
+#
+# `ai/` is supplied code we must not modify, and the brief forbids calling
+# Wikipedia's API directly from our own layer, so the only lever we have is
+# the string we pass in. These helpers turn a question into title-shaped
+# candidate terms; the caller tries them in order and stops at the first that
+# returns anything.
+
+#: Words that never carry the topic of a question. Interrogatives, auxiliaries,
+#: articles, prepositions and pronouns, plus a few vague framing nouns
+#: ("main", "current", "level") that are not article titles on their own.
+_QUESTION_STOPWORDS = frozenset({
+    "what", "which", "who", "whom", "whose", "when", "where", "why", "how",
+    "is", "are", "was", "were", "be", "been", "being", "do", "does", "did",
+    "can", "could", "will", "would", "should", "may", "might", "must",
+    "has", "have", "had",
+    "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to", "for",
+    "from", "with", "by", "as", "that", "this", "these", "those", "it", "its",
+    "their", "his", "her", "our", "your", "my",
+    "main", "current", "state", "level", "work", "works", "kind", "type",
+    "example", "examples", "difference", "differences", "way", "ways",
+})
+
+#: Longest span tried. Article titles longer than three content words are rare,
+#: and each extra length costs an upstream request for little gain.
+_MAX_TERM_WORDS = 3
+
+#: Spans tried per length: the leftmost and the rightmost. A question's topic
+#: sits at one end far more often than in the middle ("2008 financial crisis"
+#: ends one; "CRISPR-Cas9 gene editing" begins another), and capping per length
+#: rather than overall guarantees the short, high-yield spans are still reached
+#: on a long question instead of being crowded out by failing long ones.
+_SPANS_PER_LENGTH = 2
+
+
+def _content_words(question: str) -> list[str]:
+    """Question words, minus stopwords, in their original order and casing.
+
+    Casing is preserved because proper nouns and identifiers such as
+    "CRISPR-Cas9" are exactly the terms most likely to match a title.
+    """
+    text = question.strip().rstrip("?.!").strip()
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", text)
+    return [w for w in words if w.lower() not in _QUESTION_STOPWORDS]
+
+
+def wikipedia_search_terms(question: str) -> list[str]:
+    """Title-shaped candidate terms for `question`, best first.
+
+    Ordered longest span first so the most specific match wins: a three-word
+    term that hits is a better article than a one-word term that also hits.
+    Within a length the leftmost and rightmost spans are tried. Falls back to
+    the cleaned question itself when it contains nothing but stopwords, so the
+    caller always has something to send.
+    """
+    words = _content_words(question)
+    if not words:
+        cleaned = question.strip().rstrip("?.!").strip()
+        return [cleaned] if cleaned else []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for length in range(min(_MAX_TERM_WORDS, len(words)), 0, -1):
+        starts = range(0, len(words) - length + 1)
+        ends = [starts[0]]
+        if starts[-1] != starts[0]:
+            ends.append(starts[-1])
+        for start in ends[:_SPANS_PER_LENGTH]:
+            term = " ".join(words[start:start + length])
+            key = term.lower()
+            if key not in seen:
+                seen.add(key)
+                terms.append(term)
+    return terms
+
+
 __all__ = [
     "format_references",
     "normalize_source_name",
     "select_sources",
     "used_references",
+    "wikipedia_search_terms",
 ]
