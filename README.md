@@ -70,6 +70,7 @@ cp .env.example .env              # then fill in the values below
 | `DATABASE_URL` | **yes** | — | `postgresql://user:pass@host:port/db` |
 | `LOG_LEVEL` | no | `INFO` | stdlib `logging` level |
 | `CACHE_TTL_SECONDS` | no | `86400` | Source-fetch cache TTL |
+| `CACHE_TIMEOUT_SECONDS` | no | `3` | Deadline for each cache read/write, including connection acquisition (greater than 0, at most 10 seconds) |
 | `PER_SOURCE_TIMEOUT_SECONDS` | no | `10` | Outer per-source fetch deadline |
 | `MAX_SOURCES_PER_QUERY` | no | `3` | Results kept per source |
 
@@ -107,6 +108,10 @@ File watching is disabled for deployment: restart the app after updating code
 (Community Cloud: **Manage app → Reboot app**) so all modules load together.
 For local development, enable live reload explicitly with
 `streamlit run researcher/ui.py --server.fileWatcherType=auto`.
+
+Cache timeouts are recoverable: the workflow fetches the source directly and
+reports a warning. The application allows three seconds per cache operation
+for remote database connection latency; tune `CACHE_TIMEOUT_SECONDS` if needed.
 
 **Scripted 5-question demo** (matches the assignment's grading demo — runs
 every question in `data/research_questions.json` through the real pipeline):

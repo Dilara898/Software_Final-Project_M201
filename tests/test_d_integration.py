@@ -1,4 +1,5 @@
 """Offline tests for D's CLI wiring using the real C orchestrator."""
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -22,8 +23,9 @@ def test_invalid_input_without_io(argv, monkeypatch):
 
 
 @pytest.mark.parametrize('no_cache', [True, False])
+@pytest.mark.parametrize('cache_delay', [0, 0.6])
 @pytest.mark.asyncio
-async def test_ask_subset_cache_and_history(no_cache, capsys):
+async def test_ask_subset_cache_and_history(no_cache, cache_delay, capsys):
     class Fetch:
         names = []
         async def fetch(self, name, question, client):
@@ -36,10 +38,16 @@ async def test_ask_subset_cache_and_history(no_cache, capsys):
             return AnswerWithCitations(question=question, answer='Answer [1].',
                                        citations=[Citation(index=1, source=sources[0])])
 
-    pool = SimpleNamespace(fetchrow=AsyncMock(return_value=None),
+    async def read_cache(*args):
+        # Remote connection acquisition can exceed C's standalone 0.5s default.
+        await asyncio.sleep(cache_delay)
+        return None
+
+    pool = SimpleNamespace(fetchrow=AsyncMock(side_effect=read_cache),
                            execute=AsyncMock(), fetchval=AsyncMock(return_value=7))
     settings = SimpleNamespace(per_source_timeout_seconds=2,
-                               cache_ttl_seconds=60, max_sources_per_query=3)
+                               cache_ttl_seconds=60, cache_timeout_seconds=3,
+                               max_sources_per_query=3)
     args = SimpleNamespace(question='What is photosynthesis?',
                            sources='wiki,arxiv', no_cache=no_cache)
     fetch = Fetch()
@@ -53,6 +61,7 @@ async def test_ask_subset_cache_and_history(no_cache, capsys):
     pool.fetchval.assert_awaited_once()
     out = capsys.readouterr().out
     assert '[1] (wikipedia)' in out and 'History: saved' in out
+    assert '0 read errors' in out
     assert '2 bypasses' in out if no_cache else '2 misses' in out
 
 
