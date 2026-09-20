@@ -103,6 +103,11 @@ streamlit run researcher/ui.py
 # open http://localhost:8501
 ```
 
+File watching is disabled for deployment: restart the app after updating code
+(Community Cloud: **Manage app → Reboot app**) so all modules load together.
+For local development, enable live reload explicitly with
+`streamlit run researcher/ui.py --server.fileWatcherType=auto`.
+
 **Scripted 5-question demo** (matches the assignment's grading demo — runs
 every question in `data/research_questions.json` through the real pipeline):
 

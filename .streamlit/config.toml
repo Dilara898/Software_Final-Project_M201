@@ -63,3 +63,8 @@ grayBackgroundColor = "#1F1E1A"
 
 [client]
 toolbarMode = "minimal"
+
+[server]
+# Deployments replace multiple Python modules. Reload them together by
+# restarting the app, not by unloading modules while another session imports.
+fileWatcherType = "none"
