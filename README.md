@@ -1,6 +1,9 @@
 # Async Research Assistant
+M201 Final Project — Topic 4.
+Team: Dilara Rzazada, Malak Asgarova, Sanan Hajiyev, Nazrin Ibrahimova
+Deploy:https://softwarefinal-projectm201-d.streamlit.app/
 
-AI-ENG-110 Final Project — Topic 4. The user asks a research question; the
+The user asks a research question; the
 system queries **Wikipedia**, **arXiv**, and a **web-search API** (Tavily)
 concurrently, retrieves relevant excerpts, and synthesizes a single answer
 with inline `[N]` citations using an LLM (Gemini by default, with optional
