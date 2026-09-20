@@ -55,6 +55,47 @@ class TestAIFetchService:
         assert result[0].origin == "wikipedia"
 
     @pytest.mark.asyncio
+    async def test_wikipedia_empty_success_logs_distinct_warning(self, monkeypatch, caplog):
+        # Regression: a deployed instance saw fetch_wikipedia succeed (no
+        # exception) with zero results for extremely common queries that
+        # reliably return real results elsewhere with the same headers --
+        # indistinguishable, before this test, from a routine empty search
+        # in the logs. This warning exists so that distinction is visible.
+        async def empty_wikipedia(query, *, max_results, client):
+            return []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", empty_wikipedia)
+        service = AIFetchService()
+
+        with caplog.at_level(logging.WARNING, logger="researcher.services.ai_service"):
+            result = await service.fetch(
+                "wikipedia", "gravity", client=SimpleNamespace(headers={})
+            )
+
+        assert result == []
+        records = [
+            r for r in caplog.records if r.message == "wikipedia_empty_result_suspicious"
+        ]
+        assert len(records) == 1
+        assert records[0].query_length == len("gravity")
+        assert "gravity" not in caplog.text  # never log raw query text
+
+    @pytest.mark.asyncio
+    async def test_other_sources_empty_success_does_not_warn(self, monkeypatch, caplog):
+        async def empty_web(query, *, max_results, client):
+            return []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", empty_web)
+        service = AIFetchService()
+
+        with caplog.at_level(logging.WARNING, logger="researcher.services.ai_service"):
+            await service.fetch("web", "an obscure query", client=SimpleNamespace(headers={}))
+
+        assert not any(
+            r.message == "wikipedia_empty_result_suspicious" for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
     async def test_unknown_source_raises_upstream_data_error_without_retry(self):
         service = AIFetchService(max_attempts=5)
         with pytest.raises(UpstreamDataError):

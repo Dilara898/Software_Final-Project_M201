@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
@@ -183,14 +184,35 @@ class AIFetchService:
             )
             raise
         else:
+            duration_ms = round((time.monotonic() - start) * 1000, 1)
             log.info(
                 "fetch_succeeded",
                 extra={
                     "source": source,
                     "result_count": len(result),
-                    "duration_ms": round((time.monotonic() - start) * 1000, 1),
+                    "duration_ms": duration_ms,
                 },
             )
+            if source == "wikipedia" and not result:
+                # Distinct from a routine empty search: `fetch_wikipedia`
+                # returning zero results without raising is indistinguishable
+                # in "fetch_succeeded" from "no article exists" -- but it can
+                # also mean Wikimedia soft-limited this host (observed: a
+                # cloud-hosted deployment got 200 OK + zero results for
+                # extremely common queries -- "gravity", "BMW", "density" --
+                # that reliably return real results from other networks with
+                # the same User-Agent). Never log the query text itself
+                # (could contain a user's sensitive input); log its length
+                # and a hash instead, enough to correlate repeat occurrences
+                # of the *same* query across deployments without exposing it.
+                log.warning(
+                    "wikipedia_empty_result_suspicious",
+                    extra={
+                        "duration_ms": duration_ms,
+                        "query_length": len(query),
+                        "query_hash": hashlib.sha256(query.encode()).hexdigest()[:12],
+                    },
+                )
             return result
 
 
