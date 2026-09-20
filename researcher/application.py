@@ -131,6 +131,7 @@ async def build_result(args, settings, pool, client, fetch, synthesis):
         client=client,
         cache=cache,
         cache_key=cache_key,
+        cache_timeout_seconds=settings.cache_timeout_seconds,
         max_results_per_source=settings.max_sources_per_query,
     )
 

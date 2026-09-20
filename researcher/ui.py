@@ -27,7 +27,9 @@ import sys
 # repository root, so `import researcher.*` below needs the root added
 # first. That is why the imports after this line are not at the top of
 # the file (ruff.toml exempts this file from E402 for the same reason).
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_repository_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repository_root not in sys.path:
+    sys.path.append(_repository_root)
 
 
 

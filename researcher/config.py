@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     database_url: str
     log_level: str = "INFO"
     cache_ttl_seconds: int = 86_400
+    cache_timeout_seconds: float = Field(default=3.0, gt=0, le=10)
     per_source_timeout_seconds: float = 10.0
     max_sources_per_query: int = 3
 
