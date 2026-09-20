@@ -38,6 +38,7 @@ from ai.schemas import AnswerWithCitations, Source
 from ai.sources import fetch_arxiv, fetch_web, fetch_wikipedia
 from ai.synthesizer import synthesize
 from researcher.concurrency.contracts import UpstreamDataError
+from researcher.core.logic import wikipedia_search_terms
 from researcher.exceptions import NoSourcesError
 from researcher.services.retry import RateLimiter, call_with_retry, error_code_for
 from researcher.services.transport import wikipedia_retrying_client
@@ -125,7 +126,7 @@ class AIFetchService:
 
         limiter = self._limiter_for(source)
 
-        async def _call() -> list[Source]:
+        async def _fetch_term(term: str) -> list[Source]:
             # B-05: pacing applies to every attempt, including retries.
             await limiter.acquire()
 
@@ -152,7 +153,7 @@ class AIFetchService:
                 # responsibility is validating the *shape* of a successful
                 # return, which is the one thing only this boundary can check.
                 result = await fetcher(
-                    query, max_results=self._max_results, client=effective_client
+                    term, max_results=self._max_results, client=effective_client
                 )
             finally:
                 if wrapped_client is not None:
@@ -165,6 +166,31 @@ class AIFetchService:
                     f"{source} fetcher returned {type(result).__name__}, "
                     "expected list[Source]"
                 )
+            return result
+
+        async def _call() -> list[Source]:
+            # `ai.fetch_wikipedia` searches MediaWiki's opensearch endpoint,
+            # which matches title prefixes rather than free text, so a whole
+            # question matches nothing and comes back as an empty success.
+            # `wikipedia_search_terms` turns the question into title-shaped
+            # candidates; take the first that returns anything, most specific
+            # first. Other sources take the question as written.
+            if source != "wikipedia":
+                return await _fetch_term(query)
+
+            terms = wikipedia_search_terms(query) or [query]
+            result: list[Source] = []
+            for position, term in enumerate(terms, 1):
+                result = await _fetch_term(term)
+                if result:
+                    if position > 1:
+                        # Never log the term itself: it is derived from the
+                        # user's question, which may be sensitive.
+                        log.info(
+                            "wikipedia_term_resolved",
+                            extra={"attempt": position, "candidates": len(terms)},
+                        )
+                    return result
             return result
 
         start = time.monotonic()
@@ -196,15 +222,22 @@ class AIFetchService:
             if source == "wikipedia" and not result:
                 # Distinct from a routine empty search: `fetch_wikipedia`
                 # returning zero results without raising is indistinguishable
-                # in "fetch_succeeded" from "no article exists" -- but it can
-                # also mean Wikimedia soft-limited this host (observed: a
-                # cloud-hosted deployment got 200 OK + zero results for
-                # extremely common queries -- "gravity", "BMW", "density" --
-                # that reliably return real results from other networks with
-                # the same User-Agent). Never log the query text itself
-                # (could contain a user's sensitive input); log its length
-                # and a hash instead, enough to correlate repeat occurrences
-                # of the *same* query across deployments without exposing it.
+                # in "fetch_succeeded" from "no article exists".
+                #
+                # The common cause is now handled upstream: opensearch matches
+                # title prefixes, so a whole question matched nothing until
+                # `wikipedia_search_terms` began supplying title-shaped terms.
+                # Reaching this point means every candidate term came back
+                # empty, which is worth a warning -- it can still mean the
+                # topic genuinely has no article, or that Wikimedia
+                # soft-limited this host (a cloud deployment has been reported
+                # returning 200 OK with zero results; that report is not
+                # reproducible from a normal network and remains unconfirmed).
+                #
+                # Never log the query text itself (could contain a user's
+                # sensitive input); log its length and a hash instead, enough
+                # to correlate repeat occurrences of the *same* query across
+                # deployments without exposing it.
                 log.warning(
                     "wikipedia_empty_result_suspicious",
                     extra={
