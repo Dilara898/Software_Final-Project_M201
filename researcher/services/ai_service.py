@@ -41,6 +41,7 @@ from researcher.concurrency.contracts import UpstreamDataError
 from researcher.exceptions import NoSourcesError
 from researcher.services.retry import RateLimiter, call_with_retry, error_code_for
 from researcher.services.transport import wikipedia_retrying_client
+from researcher.services.wikipedia_fulltext_fallback import search_wikipedia_fulltext
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +155,15 @@ class AIFetchService:
                 result = await fetcher(
                     query, max_results=self._max_results, client=effective_client
                 )
+                if source == "wikipedia" and not result:
+                    # ai.sources.fetch_wikipedia searches by title-prefix
+                    # match, which cannot match a natural-language question
+                    # (verified directly -- see wikipedia_fulltext_fallback's
+                    # module docstring). Try a genuine full-text search
+                    # before accepting "no article exists".
+                    result = await search_wikipedia_fulltext(
+                        query, max_results=self._max_results, client=effective_client
+                    )
             finally:
                 if wrapped_client is not None:
                     await wrapped_client.aclose()

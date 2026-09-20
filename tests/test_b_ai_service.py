@@ -424,8 +424,15 @@ class TestWikipediaTransportRetryIntegration:
         calls = {"summary": 0}
 
         def handler(request):
-            if "opensearch" in str(request.url):
+            url = str(request.url)
+            if "opensearch" in url:
                 return httpx.Response(200, json=["q", ["Python"], [], []])
+            if "search/page" in url:
+                # Primary search already matched a title; the fulltext
+                # fallback is only reached if the primary path ends up
+                # empty, which is exactly what this test is verifying does
+                # NOT happen for a different reason (transport retry off).
+                return httpx.Response(200, json={"pages": []})
             calls["summary"] += 1
             return httpx.Response(500, text="server error")
 
@@ -436,6 +443,95 @@ class TestWikipediaTransportRetryIntegration:
 
         assert result == []
         assert calls["summary"] == 1  # not retried -- feature disabled
+
+
+class TestWikipediaFulltextFallbackIntegration:
+    """ai.sources.fetch_wikipedia's title-prefix search cannot match a
+    natural-language question (verified directly -- see
+    wikipedia_fulltext_fallback's module docstring). AIFetchService falls
+    back to full-text search when the primary search finds nothing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fallback_used_when_primary_search_finds_nothing(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+
+        def handler(request):
+            url = str(request.url)
+            if "action=opensearch" in url:
+                return httpx.Response(200, json=["q", [], [], []])  # title-match: nothing
+            if "search/page" in url:
+                return httpx.Response(200, json={"pages": [{"title": "Photosynthesis"}]})
+            return httpx.Response(
+                200,
+                json={
+                    "title": "Photosynthesis",
+                    "extract": "Photosynthesis is a process.",
+                    "content_urls": {
+                        "desktop": {"page": "https://en.wikipedia.org/wiki/Photosynthesis"}
+                    },
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService()
+        result = await service.fetch(
+            "wikipedia", "What is photosynthesis?", client=client
+        )
+        await client.aclose()
+
+        assert len(result) == 1
+        assert result[0].title == "Photosynthesis"
+
+    @pytest.mark.asyncio
+    async def test_fallback_not_used_when_primary_search_succeeds(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+        fulltext_calls = {"n": 0}
+
+        def handler(request):
+            url = str(request.url)
+            if "action=opensearch" in url:
+                return httpx.Response(200, json=["q", ["Python"], [], []])
+            if "search/page" in url:
+                fulltext_calls["n"] += 1
+                return httpx.Response(200, json={"pages": []})
+            return httpx.Response(
+                200,
+                json={
+                    "title": "Python",
+                    "extract": "Python is a language.",
+                    "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Python"}},
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService()
+        result = await service.fetch("wikipedia", "python", client=client)
+        await client.aclose()
+
+        assert len(result) == 1
+        assert fulltext_calls["n"] == 0  # primary already succeeded -- fallback never called
+
+    @pytest.mark.asyncio
+    async def test_stays_empty_when_fallback_also_finds_nothing(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+
+        def handler(request):
+            url = str(request.url)
+            if "action=opensearch" in url:
+                return httpx.Response(200, json=["q", [], [], []])
+            if "search/page" in url:
+                return httpx.Response(200, json={"pages": []})
+            return httpx.Response(404, text="not found")
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService()
+        result = await service.fetch(
+            "wikipedia", "a truly nonexistent topic zzz", client=client
+        )
+        await client.aclose()
+
+        assert result == []
 
 
 # ---------------------------------------------------------------------------
