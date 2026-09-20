@@ -4,6 +4,7 @@ no network).
 """
 
 from __future__ import annotations
+from types import SimpleNamespace
 
 import asyncio
 import logging
@@ -14,6 +15,7 @@ import pytest
 from ai.providers.base import ProviderError
 from ai.schemas import AnswerWithCitations, Citation, Source
 from researcher.concurrency.contracts import UpstreamDataError
+from researcher.exceptions import NoSourcesError
 from researcher.services import ai_service
 from researcher.services.ai_service import (
     AIFetchService,
@@ -48,7 +50,7 @@ class TestAIFetchService:
 
         monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", fake_wikipedia)
         service = AIFetchService()
-        result = await service.fetch("wikipedia", "q", client=object())
+        result = await service.fetch("wikipedia", "q", client=SimpleNamespace(headers={}))
         assert calls == ["wikipedia"]
         assert result[0].origin == "wikipedia"
 
@@ -102,7 +104,12 @@ class TestAIFetchService:
         )
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(
-                service.fetch("wikipedia", "q", client=object()), timeout=2
+                service.fetch(
+                    "wikipedia",
+                    "q",
+                    client=SimpleNamespace(headers={}),
+                ),
+                timeout=2,
             )
 
     @pytest.mark.asyncio
@@ -177,7 +184,10 @@ class TestAIFetchService:
 
     @pytest.mark.asyncio
     async def test_no_secret_text_reaches_logs(self, monkeypatch, caplog):
-        secret = "sk-live-SUPER-SECRET-VALUE"
+        # Fake, secret-SHAPED fixture -- never a real credential. The
+        # test asserts this exact text is redacted before it reaches a
+        # log record, so it has to look like a key to be meaningful.
+        secret = "sk-test-FAKE-CREDENTIAL-DO-NOT-USE"
 
         async def always_fails(query, *, max_results, client):
             raise ProviderError(f"upstream said: {secret}")
@@ -281,6 +291,112 @@ class TestHttpStatusClassification:
         assert error_code_for(exc) == "provider_error_status_401"
 
 
+class TestFetchServicePacing:
+    """Integration-level regression test for B-05: pacing must apply to
+    every attempt made through AIFetchService.fetch, including retries, not
+    just the first call.
+    """
+
+    @pytest.mark.asyncio
+    async def test_pacing_applies_across_retries(self, monkeypatch):
+        import time
+
+        call_times: list[float] = []
+
+        async def flaky(query, *, max_results, client):
+            call_times.append(time.monotonic())
+            if len(call_times) < 3:
+                raise ProviderError("transient")
+            return []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", flaky)
+        service = AIFetchService(
+            max_attempts=5,
+            min_interval_seconds=0.05,
+            initial_wait_seconds=0.001,
+            max_wait_seconds=0.001,
+        )
+        await service.fetch("web", "q", client=object())
+        intervals = [call_times[i] - call_times[i - 1] for i in range(1, len(call_times))]
+        assert all(interval >= 0.04 for interval in intervals)  # small tolerance
+
+    @pytest.mark.asyncio
+    async def test_pacing_disabled_by_default(self, monkeypatch):
+        import time
+
+        call_times: list[float] = []
+
+        async def flaky(query, *, max_results, client):
+            call_times.append(time.monotonic())
+            if len(call_times) < 3:
+                raise ProviderError("transient")
+            return []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "web", flaky)
+        service = AIFetchService(
+            max_attempts=5, initial_wait_seconds=0.001, max_wait_seconds=0.001
+        )
+        start = time.monotonic()
+        await service.fetch("web", "q", client=object())
+        assert time.monotonic() - start < 0.1  # no artificial pacing delay
+
+
+class TestWikipediaTransportRetryIntegration:
+    """Integration-level regression test for B-07, through the full
+    AIFetchService.fetch path (not just the transport wrapper in
+    isolation -- see tests/test_b_transport.py for that).
+    """
+
+    @pytest.mark.asyncio
+    async def test_wikipedia_summary_500_then_200_recovers_through_fetch_service(
+        self, monkeypatch
+    ):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+        calls = {"summary": 0}
+
+        def handler(request):
+            if "opensearch" in str(request.url):
+                return httpx.Response(200, json=["q", ["Python"], [], []])
+            calls["summary"] += 1
+            if calls["summary"] < 2:
+                return httpx.Response(500, text="server error")
+            return httpx.Response(
+                200,
+                json={
+                    "title": "Python",
+                    "extract": "Python is a language.",
+                    "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Python"}},
+                },
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService(max_attempts=1)  # outer retry off; transport retry only
+        result = await service.fetch("wikipedia", "python", client=client)
+        await client.aclose()
+
+        assert len(result) == 1
+        assert calls["summary"] == 2
+
+    @pytest.mark.asyncio
+    async def test_can_be_disabled(self, monkeypatch):
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", ai_service.fetch_wikipedia)
+        calls = {"summary": 0}
+
+        def handler(request):
+            if "opensearch" in str(request.url):
+                return httpx.Response(200, json=["q", ["Python"], [], []])
+            calls["summary"] += 1
+            return httpx.Response(500, text="server error")
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        service = AIFetchService(max_attempts=1, wikipedia_transport_retry=False)
+        result = await service.fetch("wikipedia", "python", client=client)
+        await client.aclose()
+
+        assert result == []
+        assert calls["summary"] == 1  # not retried -- feature disabled
+
+
 # ---------------------------------------------------------------------------
 # AISynthesisService
 # ---------------------------------------------------------------------------
@@ -328,32 +444,59 @@ class TestAISynthesisService:
         service.shutdown()
 
     @pytest.mark.asyncio
-    async def test_failover_to_second_provider_after_first_exhausts(self, monkeypatch):
+    async def test_failover_to_second_provider_after_first_exhausts(
+        self, monkeypatch
+    ):
+        from ai.providers.base import LLMProvider
+
         provider_used: list[int] = []
+        token_budgets: list[int] = []
 
-        def make_synth(fail_provider_index: int):
-            def _synth(q, s, *, llm=None):
-                idx = llm  # llm is the marker int for this fake test
-                provider_used.append(idx)
-                if idx == fail_provider_index:
-                    raise ProviderError("primary provider down: apikey=SECRET")
-                return fake_answer(q, s)
+        class FakeProvider(LLMProvider):
+            def __init__(self, index: int):
+                self.index = index
 
-            return _synth
+            def complete(
+                self,
+                prompt: str,
+                *,
+                json_schema: dict | None = None,
+                max_tokens: int = 1024,
+            ) -> str:
+                provider_used.append(self.index)
+                token_budgets.append(max_tokens)
 
-        monkeypatch.setattr(ai_service, "synthesize", make_synth(0))
+                if self.index == 0:
+                    raise ProviderError("primary provider down")
+
+                return "Supported [1]."
+
+        def fake_synthesize(q, s, *, llm=None):
+            llm.complete(q)
+            return fake_answer(q, s)
+
+        monkeypatch.setattr(ai_service, "synthesize", fake_synthesize)
+
         service = AISynthesisService(
-            llm_factories=[lambda: 0, lambda: 1],
+            llm_factories=[
+                lambda: FakeProvider(0),
+                lambda: FakeProvider(1),
+            ],
             max_attempts=2,
             initial_wait_seconds=0.01,
             max_wait_seconds=0.02,
         )
-        result = await service.synthesize("q", [sample_source("web")])
+
+        try:
+            result = await service.synthesize(
+                "q", [sample_source("web")]
+            )
+        finally:
+            service.shutdown()
+
         assert result.answer == "Supported [1]."
-        # Provider 0 tried (and retried) before falling over to provider 1.
-        assert provider_used.count(0) == 2
-        assert provider_used.count(1) == 1
-        service.shutdown()
+        assert provider_used == [0, 0, 1]
+        assert token_budgets == [4096, 4096, 4096]
 
     @pytest.mark.asyncio
     async def test_all_providers_exhausted_raises_upstream_data_error(self, monkeypatch):
@@ -463,8 +606,28 @@ class TestAISynthesisService:
             AISynthesisService(llm_factories=[])
 
     @pytest.mark.asyncio
+    async def test_empty_sources_raises_no_sources_error_without_touching_factory(self):
+        """Regression test for B-06: an empty source list must fail before
+        any provider factory, SDK, or retry machinery is touched.
+        """
+        calls = {"n": 0}
+
+        def factory():
+            calls["n"] += 1
+            return object()
+
+        service = AISynthesisService(llm_factories=[factory])
+        with pytest.raises(NoSourcesError):
+            await service.synthesize("q", [])
+        assert calls["n"] == 0
+        service.shutdown()
+
+    @pytest.mark.asyncio
     async def test_no_secret_text_reaches_logs(self, monkeypatch, caplog):
-        secret = "sk-live-SUPER-SECRET-VALUE"
+        # Fake, secret-SHAPED fixture -- never a real credential. The
+        # test asserts this exact text is redacted before it reaches a
+        # log record, so it has to look like a key to be meaningful.
+        secret = "sk-test-FAKE-CREDENTIAL-DO-NOT-USE"
 
         def always_fails(q, s, *, llm=None):
             raise ProviderError(f"upstream said: {secret}")

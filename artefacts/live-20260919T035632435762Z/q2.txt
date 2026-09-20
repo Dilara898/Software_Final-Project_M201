@@ -1,0 +1,20 @@
+Mode: LIVE
+Question ID: q2
+Sources: web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: How do transformer-based language models handle long context windows?
+
+Conventional transformer-based language models process context through an attention operation that compares the latest token to every previous token, allowing the model to "remember" all prior information [1]. However, this standard architecture faces quadratic time and space growth as context length expands, causing models to become increasingly inefficient and suffer performance drops when context limits overflow [1, 2, 3]. To handle longer context windows, models rely on algorithmic advances and strategies, such as modified positional encodings [2, 3]. Extending this context window enables LLMs to process lengthy tasks—such as reading entire books, codebases, or legal contracts—without losing track [2].
+
+References:
+[1] (web) Why large language models struggle with long contexts
+https://www.understandingai.org/p/why-large-language-models-struggle
+[2] (web) Long-Context Windows in Large Language Models
+https://medium.com/@adnanmasood/long-context-windows-in-large-language-models-applications-in-comprehension-and-code-03bf4027066f
+[3] (web) 2 Ways to Extend LLM Context Windows — Supermemory
+https://supermemory.ai/blog/extending-context-windows-in-llms
+History: saved
+Session: 8
+3 documents; 1 providers; total 10.00 seconds; answer ready 9.96 seconds; cache: 0 hits, 1 misses, 0 bypasses; 0 read errors, 0 write errors

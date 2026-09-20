@@ -2,8 +2,8 @@
 
 ## Scope and boundaries
 
-B owns `researcher/services/` (this file's code), `researcher/exceptions.py`,
-its tests (`tests/test_b_ai_service.py`, `tests/test_b_exceptions.py`),
+B owns `researcher/services/`, `researcher/core/logic.py`,
+`researcher/exceptions.py`, their tests (`tests/test_b_*.py`),
 `requirements-b.txt` and this document. The supplied `ai/` package and Part
 C's `researcher/concurrency/` are unchanged. A owns application
 settings/models/storage; C owns concurrency, the research workflow and the
@@ -50,6 +50,21 @@ student's wrapper code." `researcher/services/` is that wrapper code:
   `researcher/validation.py` imports. See that module's own docstring for
   how it relates to C's `OrchestrationError` family in
   `researcher/concurrency/research.py` (deliberately not merged).
+- `researcher/services/transport.py` — `_RetryingTransport` /
+  `wikipedia_retrying_client()`: transport-level retry for
+  `ai.sources.fetch_wikipedia`'s internal per-title summary fetch (B-07;
+  see the "Fixed after external review" section below for why this can't
+  live in `ai_service.py`'s own retry policy).
+- `researcher/services/logging_setup.py` — `configure_logging()` (idempotent,
+  `LOG_LEVEL`-aware, suppresses httpx/httpcore noise) and
+  `ExtraFieldsFormatter` (renders every log call's `extra={...}` fields,
+  which the standard library's default formatter silently drops).
+- `researcher/core/logic.py` — source selection (`select_sources`,
+  `normalize_source_name`: alias resolution, dedup, canonical stable
+  order, `ValidationError` on an unknown name) and reference display
+  (`used_references`, `format_references`) for D's CLI. Deliberately thin:
+  does not reimplement citation extraction, which `ai/synthesizer.py`
+  already does.
 
 ## Integration contract
 
@@ -167,13 +182,51 @@ this revision:
   exact failure the review reproduced is fixed: `from researcher.validation
   import validate_question, validate_limit` now succeeds, and both
   functions still raise the (now-real) `ValidationError` correctly.
+- **B-06 (P2) — empty `sources` still triggered one LLM factory call before
+  failing.** `AISynthesisService.synthesize` now raises the shared
+  `NoSourcesError` (from `researcher/exceptions.py`) immediately when
+  `sources` is empty, before any factory, thread, or retry machinery runs.
+  Verified: zero factory calls for `sources=[]`.
+- **B-05 (P2) — no mechanism to pace provider request rate.** Added
+  `RateLimiter` to `retry.py`: a simple async min-interval pacer
+  (`acquire()` waits, if needed, until `min_interval_seconds` has elapsed
+  since its own last acquire). Wired into `AIFetchService` via
+  `min_interval_seconds` (default `0.0`, i.e. disabled -- existing default
+  timing is unaffected unless explicitly configured), one shared instance
+  per source name, applied inside `_call()` so retries are paced too, not
+  just the first attempt. Uses plain `asyncio.sleep`, so the wait is
+  cancellable and counts against the caller's own per-attempt timeout
+  budget (it happens inside `call_with_retry`'s `asyncio.wait_for` window).
+  `_now`/`_sleep` are injectable for a fake-clock test
+  (`tests/test_b_rate_limiter.py`) that verifies pacing, cancellation, and
+  "already enough time elapsed -> no wait" without spending real wall time.
+- **B-07 (P2) — Wikipedia's internal per-title summary fetch swallows HTTP
+  errors before they reach this wrapper's retry layer.**
+  `ai/sources.py`'s `fetch_wikipedia` catches any exception from a
+  per-title summary request with a bare `except Exception: continue`, so a
+  transient 500/429 on one title never surfaces as an exception this
+  wrapper's retry policy could see -- `fetch_wikipedia` just returns
+  successfully with fewer (possibly zero) results. Blindly retrying an
+  empty result is not the fix (the review explicitly warns against it: a
+  legitimately empty search is possible, and retrying can't tell the two
+  apart). Since `ai/sources.py` is not touched, the fix lives one layer
+  down: new `researcher/services/transport.py` wraps the `httpx.AsyncClient`
+  passed into `fetch_wikipedia` with a custom `httpx.AsyncBaseTransport`
+  (`_RetryingTransport`) that retries a transient HTTP status/transport
+  exception *before* control returns to `fetch_wikipedia`, reusing
+  `retry.py`'s `_is_transient_status` classifier so 401/404 are still left
+  alone. The wrapper never closes the client it wraps. Wired into
+  `AIFetchService` for `source == "wikipedia"` only (toggleable via
+  `wikipedia_transport_retry`, default on). Verified via the real
+  `ai.sources.fetch_wikipedia` behind an `httpx.MockTransport`: summary
+  500-then-200 recovers; summary 404 is not retried; a legitimately empty
+  search stays empty without extra retries; the wrapper never closes the
+  client it was given.
 
-Not yet fixed, tracked for follow-up (see the review for full detail):
-B-05 (no provider-level pacing/rate limiting), B-06 (empty `sources` still
-triggers one LLM factory call before failing), B-07 (Wikipedia's internal
-per-title summary-fetch swallows HTTP errors before they reach this
-wrapper's retry layer), plus the missing `logging_setup.py` and
-`core/logic.py` (source alias/dedup/validation) deliverables.
+All P1/P2 findings from the review are now addressed. Remaining, lower
+priority: the missing incident-artifact deliverable (B9) and a live
+provider/database smoke test (the review's final acceptance note) are not
+part of this offline-test-driven pass.
 
 ## Known cross-role gap (not fixed here, flagged for the team)
 

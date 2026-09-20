@@ -1,0 +1,20 @@
+Mode: LIVE
+Question ID: q4
+Sources: web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: What is the current state of fusion energy research?
+
+Nuclear fusion research currently involves various national and international collaborations, such as the ITER megaproject, which aims to demonstrate large-scale energy feasibility using magnetic confinement fusion in a tokamak reactor [1]. Key research goals include achieving sustained fusion reactions where energy output exceeds required input at ITER, alongside efforts at the National Ignition Facility (NIF) to maximize energy output [1]. Although research to put fusion energy on the power grid remains ongoing, it has already advanced plasma physics and fusion technology while delivering real-world benefits like improved materials and industrial processes [2]. However, despite recent publicity claiming commercial fusion could be achieved in the next 10 to 20 years, experts note that practical commercial energy from fusion remains an ongoing development effort [3].
+
+References:
+[1] (web) The Current State of Nuclear Fusion Research: A Review and Assessment of Leading Technologies
+https://www.worldscholarsreview.org/article/the-current-state-of-nuclear-fusion-research-a-review-and-assessment-of-leading-technologies
+[2] (web) Fusion energy: Pathway to abundant power | NSF - U.S. National Science Foundation
+https://www.nsf.gov/science-matters/fusion-energy-pathway-abundant-power
+[3] (web) Notes on the Recent Hype about Imminence of ...
+https://www.belfercenter.org/research-analysis/notes-recent-hype-about-imminence-commercial-fusion-energy
+History: saved
+Session: 10
+3 documents; 1 providers; total 10.57 seconds; answer ready 10.55 seconds; cache: 0 hits, 1 misses, 0 bypasses; 0 read errors, 0 write errors

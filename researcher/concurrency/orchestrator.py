@@ -14,6 +14,7 @@ import httpx
 
 from ai.providers.base import ProviderError
 from ai.schemas import Source
+from researcher.services.http_client import source_client
 from researcher.concurrency.contracts import (
     Cache,
     FetchService,
@@ -97,6 +98,9 @@ class SourceOrchestrator:
         cache: Cache | None = None,
         cache_key: Callable[[str, str], str] | None = None,
         queue_timeout_seconds: float = 10,
+        # Kept short on purpose: a cache write is best-effort, and the
+        # per-source budget it spends from defaults to 10s. Callers that
+        # need longer should pass it explicitly rather than raise it here.
         cache_timeout_seconds: float = 0.5,
         max_results_per_source: int = 3,
     ) -> None:
@@ -339,5 +343,5 @@ class SourceOrchestrator:
 
         if self._client is not None:
             return await run(self._client)
-        async with httpx.AsyncClient(timeout=self._timeout) as owned_client:
+        async with source_client(timeout_seconds=self._timeout) as owned_client:
             return await run(owned_client)

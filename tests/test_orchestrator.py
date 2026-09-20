@@ -77,7 +77,14 @@ async def test_source_timeout_preserves_fast_results_and_cancels_slow_task():
 
     service = AsyncMock()
     service.fetch.side_effect = fetch
-    result = await asyncio.wait_for(make(service, timeout_seconds=0.03).collect("q"), 1)
+    transport = httpx.MockTransport(
+        lambda request: pytest.fail("Unexpected HTTP request")
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await asyncio.wait_for(
+            make(service, timeout_seconds=0.03, client=client).collect("q"),
+            1,
+        )
     assert result.used == ["wikipedia", "web"]
     assert result.failed == ["arxiv"]
     assert result.outcomes[1].status == "timeout"
@@ -189,9 +196,16 @@ async def test_cache_write_timeout_preserves_successful_fetch():
 
 
 @pytest.mark.asyncio
-async def test_unexpected_error_cleans_up_siblings_before_closing_client():
+async def test_unexpected_error_cleans_up_siblings_before_closing_client(monkeypatch):
+    # Retain ownership/close behavior without platform TLS/proxy startup cost.
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(lambda r: None), **kwargs),
+    )
     entered = asyncio.Event()
-    stopped = asyncio.Event()
+    started = set()
+    stopped = set()
     clients = []
 
     async def fetch(name, question, client):
@@ -199,41 +213,60 @@ async def test_unexpected_error_cleans_up_siblings_before_closing_client():
         if name == "wikipedia":
             await entered.wait()
             raise TypeError("programming bug")
+        started.add(name)
+        if started == {"arxiv", "web"}:
+            entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            assert not client.is_closed
+            stopped.add(name)
+
+    service = AsyncMock()
+    service.fetch.side_effect = fetch
+    with pytest.raises(TypeError, match="programming bug"):
+        # This is a hang watchdog, not a latency assertion. Source expiry must
+        # not race the deliberately triggered programmer error.
+        await asyncio.wait_for(make(service, timeout_seconds=10).collect("q"), 5)
+    assert stopped == started == {"arxiv", "web"}
+    assert len(clients) == 3
+    assert all(client.is_closed for client in clients)
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_is_propagated(monkeypatch):
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx, "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(lambda r: None), **kwargs),
+    )
+    entered = asyncio.Event()
+    stopped = asyncio.Event()
+    clients = []
+
+    async def fetch(name, question, client):
+        clients.append(client)
         entered.set()
         try:
-            await asyncio.sleep(30)
+            await asyncio.Event().wait()
         finally:
             assert not client.is_closed
             stopped.set()
 
     service = AsyncMock()
     service.fetch.side_effect = fetch
-    with pytest.raises(TypeError, match="programming bug"):
-        await asyncio.wait_for(make(service).collect("q"), 1)
+    task = asyncio.create_task(make(service, timeout_seconds=10).collect("q", ["web"]))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
     assert stopped.is_set()
-    assert all(client.is_closed for client in clients)
-
-
-@pytest.mark.asyncio
-async def test_caller_cancellation_is_propagated():
-    entered = asyncio.Event()
-    stopped = asyncio.Event()
-
-    async def fetch(name, question, client):
-        entered.set()
-        try:
-            await asyncio.sleep(30)
-        finally:
-            stopped.set()
-
-    service = AsyncMock()
-    service.fetch.side_effect = fetch
-    task = asyncio.create_task(make(service).collect("q", ["web"]))
-    await asyncio.wait_for(entered.wait(), 1)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert stopped.is_set()
+    assert len(clients) == 1 and clients[0].is_closed
 
 
 @pytest.mark.asyncio

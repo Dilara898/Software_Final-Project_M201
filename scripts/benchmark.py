@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from collections.abc import Callable
 from typing import cast
 
-import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -28,6 +27,7 @@ from researcher.concurrency.benchmarking import (
     run_benchmark,
 )
 from researcher.concurrency.contracts import FetchService
+from researcher.services.http_client import source_client
 from scripts.c_offline import OfflineService, offline_client
 
 
@@ -126,7 +126,9 @@ def main(argv: list[str] | None = None) -> int:
             options,
             service_factory=factory,
             client_factory=(
-                lambda: httpx.AsyncClient(timeout=options.source_timeout_seconds)
+                lambda: source_client(
+                    timeout_seconds=options.source_timeout_seconds
+                )
             )
             if args.live
             else offline_client,

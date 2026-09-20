@@ -1,0 +1,65 @@
+# Design tokens extracted from research-plan_1.html's editorial/technical
+# design system, applied via Streamlit's native theming API rather than
+# fragile DOM-selector CSS overrides. See researcher/ui.py's inject_theme()
+# for the small amount of custom CSS this API can't express (the dotted
+# background grid, section-header/tag components for our own markup).
+
+[theme]
+font = "Instrument Sans:https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600;1,700&display=swap"
+headingFont = "Instrument Sans:https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600;1,700&display=swap"
+codeFont = "JetBrains Mono:https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"
+baseFontWeight = 400
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+baseRadius = "1rem"
+buttonRadius = "0.7rem"
+showWidgetBorder = true
+
+[theme.light]
+primaryColor = "#14130F"
+backgroundColor = "#FAFAF9"
+secondaryBackgroundColor = "#F5F4F2"
+textColor = "#14130F"
+borderColor = "#E7E5E1"
+linkColor = "#14130F"
+linkUnderline = true
+codeBackgroundColor = "#F5F4F2"
+codeTextColor = "#14130F"
+# Streamlit's alert/status system maps error->red, warning->orange,
+# info->blue, success->green by default. The reference is deliberately
+# monochromatic and reserves color for genuine errors only, so warning/
+# info/success are toned to neutral ink instead of Streamlit's default
+# bright orange/blue/green.
+redColor = "#A8321F"
+redBackgroundColor = "#FBF1EF"
+orangeColor = "#52504A"
+orangeBackgroundColor = "#F5F4F2"
+blueColor = "#52504A"
+blueBackgroundColor = "#F5F4F2"
+greenColor = "#14130F"
+greenBackgroundColor = "#F5F4F2"
+grayColor = "#8B887F"
+grayBackgroundColor = "#F5F4F2"
+
+[theme.dark]
+primaryColor = "#F7F5F1"
+backgroundColor = "#0D0D0C"
+secondaryBackgroundColor = "#171613"
+textColor = "#F7F5F1"
+borderColor = "#2B2925"
+linkColor = "#F7F5F1"
+linkUnderline = true
+codeBackgroundColor = "#1F1E1A"
+codeTextColor = "#F7F5F1"
+redColor = "#E8967F"
+redBackgroundColor = "#241713"
+orangeColor = "#B3AFA6"
+orangeBackgroundColor = "#1F1E1A"
+blueColor = "#B3AFA6"
+blueBackgroundColor = "#1F1E1A"
+greenColor = "#F7F5F1"
+greenBackgroundColor = "#1F1E1A"
+grayColor = "#7C786F"
+grayBackgroundColor = "#1F1E1A"
+
+[client]
+toolbarMode = "minimal"
