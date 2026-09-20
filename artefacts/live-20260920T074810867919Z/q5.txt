@@ -1,0 +1,20 @@
+Mode: LIVE
+Question ID: q5
+Sources: wiki,arxiv,web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: How does CRISPR-Cas9 gene editing work at a molecular level?
+
+CRISPR-Cas9 gene editing relies on a simplified version of a bacterial antiviral defense system, utilizing the Cas9 nuclease complexed with a synthetic guide RNA (gRNA) delivered into a cell [1]. Inside the cell's nucleus, the complex locks onto a short sequence known as the PAM, after which Cas9 unzips the DNA and matches it to the target RNA [7]. If the match is complete, the Cas9 enzyme uses molecular components to cleave or cut the DNA strands at the desired location [1, 5, 7]. Following this cleavage, the cell's natural repair mechanisms join the DNA ends back together [5]. This process allows existing genes to be removed, replaced, or new ones added in vivo [1, 5].
+
+References:
+[1] (wikipedia) CRISPR gene editing
+https://en.wikipedia.org/wiki/CRISPR_gene_editing
+[5] (web) What is CRISPR-Cas9 and how does it work? | INTEGRA
+https://www.integra-biosciences.com/united-states/en/blog/article/what-crispr-cas9-and-how-does-it-work
+[7] (web) Genome Editing with CRISPR-Cas9
+https://www.youtube.com/watch?v=2pp17E4E-O8
+History: saved
+Session: 14
+7 documents; 3 providers; total 2.86 seconds; answer ready 2.86 seconds; cache: 0 hits, 0 misses, 3 bypasses; 0 read errors, 0 write errors
