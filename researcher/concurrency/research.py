@@ -157,7 +157,7 @@ class ResearchOrchestrator:
             raise NoSourcesError(bundle)
         warnings = list(bundle.warnings)
         for outcome in bundle.outcomes:
-            if outcome.status != "ok":
+            if outcome.status not in ("ok", "empty"):
                 warnings.append(
                     OperationWarning(
                         code=outcome.error_code or "source_empty",
