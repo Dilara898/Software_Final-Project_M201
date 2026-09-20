@@ -126,6 +126,56 @@ def test_ask_notes_failed_and_empty_sources(monkeypatch):
     assert "arxiv" in info_text
 
 
+def test_ask_hides_cache_layer_warnings_from_user(monkeypatch):
+    # Regression: a deployed run showed the end user a raw
+    # "cache_read_timeout: cache read timeout" box even though the
+    # orchestrator had already fallen back to a live fetch and the answer
+    # was unaffected -- a purely internal detail, not a user-facing failure.
+    from researcher.concurrency.models import OperationWarning
+
+    async def fake_run_research(args):
+        return _make_result(
+            warnings=[
+                OperationWarning(
+                    code="cache_read_timeout", stage="cache_read", message="cache read timeout"
+                ),
+                OperationWarning(
+                    code="cache_write_failed", stage="cache_write", message="cache write failed"
+                ),
+            ]
+        )
+
+    monkeypatch.setattr(application_module, "run_research", fake_run_research)
+
+    at = _at()
+    at.text_input[0].set_value("What is photosynthesis").run()
+    at.button[0].click().run()
+
+    assert at.warning == []
+
+
+def test_ask_still_shows_non_cache_warnings(monkeypatch):
+    from researcher.concurrency.models import OperationWarning
+
+    async def fake_run_research(args):
+        return _make_result(
+            warnings=[
+                OperationWarning(
+                    code="source_invalid_items", stage="fetch", message="source invalid items"
+                )
+            ]
+        )
+
+    monkeypatch.setattr(application_module, "run_research", fake_run_research)
+
+    at = _at()
+    at.text_input[0].set_value("What is photosynthesis").run()
+    at.button[0].click().run()
+
+    warning_text = "\n".join(w.value for w in at.warning)
+    assert "source_invalid_items" in warning_text
+
+
 def test_ask_reports_no_sources_error_generically(monkeypatch):
     async def fake_run_research(args):
         raise NoSourcesError("no usable sources")

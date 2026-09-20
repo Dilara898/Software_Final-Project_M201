@@ -216,6 +216,12 @@ def fact(label: str, value: str) -> str:
     return f'<span class="ara-fact">{label} <b>{value}</b></span>'
 
 
+# Stages whose warnings are an internal cache-layer detail, not a
+# user-facing failure: the orchestrator already falls back to a live fetch
+# on a cache read/write problem, so the request still succeeds correctly.
+_SILENT_WARNING_STAGES = frozenset({"cache_read", "cache_write"})
+
+
 # ---------------------------------------------------------------------------
 # Application logic (unchanged from the pre-redesign version): building the
 # args namespace, calling the shared pipeline, and mapping outcomes/errors
@@ -265,16 +271,28 @@ def render_result(result: ResearchResult) -> None:
     if bundle.empty:
         st.info("Sources with no results: " + ", ".join(bundle.empty))
     for warning in result.warnings:
+        if warning.stage in _SILENT_WARNING_STAGES:
+            # Cache read/write hiccups don't affect correctness -- the
+            # orchestrator already fell back to a live fetch and the answer
+            # is unaffected. Surfacing the raw internal code+message here
+            # (e.g. "cache_read_timeout: cache read timeout") reads as a
+            # user-facing failure when nothing actually failed for them.
+            # Still logged server-side by the orchestrator; surfaced below
+            # as a subtle count instead of a loud warning box.
+            continue
         st.warning(f"{warning.code}: {warning.message}")
 
     stats = result.cache_stats
+    facts = [
+        fact("Documents", str(len(bundle.sources))),
+        fact("Providers", str(len(bundle.used))),
+        fact("Time", f"{result.timings.total_ms / 1000:.2f}s"),
+        fact("Cache hits", str(stats.hits)),
+    ]
+    if stats.read_errors or stats.write_errors:
+        facts.append(fact("Cache issues", str(stats.read_errors + stats.write_errors)))
     st.markdown(
-        '<div class="ara-facts">'
-        + fact("Documents", str(len(bundle.sources)))
-        + fact("Providers", str(len(bundle.used)))
-        + fact("Time", f"{result.timings.total_ms / 1000:.2f}s")
-        + fact("Cache hits", str(stats.hits))
-        + "</div>",
+        '<div class="ara-facts">' + "".join(facts) + "</div>",
         unsafe_allow_html=True,
     )
 
