@@ -1,0 +1,22 @@
+Mode: LIVE
+Question ID: q4
+Sources: wiki,arxiv,web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: What is the current state of fusion energy research?
+
+Nuclear fusion research is actively ongoing across more than 50 IAEA member states, driven by impressive progress in fusion and plasma physics [8]. Major international collaborations include ITER, a megaproject utilizing a tokamak reactor to demonstrate magnetic confinement fusion and achieve sustained reactions where energy output exceeds input [7]. Additionally, programs like the U.S. Department of Energy's ALPHA program are exploring lower-cost, intermediate-density pulsed fusion approaches [4], while the DEMOnstration Power Plant (DEMO) is currently in the design stages to eventually supply fusion power [8]. Although putting fusion energy on the electrical grid remains a work in progress, the research has already advanced plasma physics and delivered real-world technological benefits [9].
+
+References:
+[4] (arxiv) Retrospective of the ARPA-E ALPHA fusion program
+http://arxiv.org/abs/1907.09921v2
+[7] (web) The Current State of Nuclear Fusion Research
+https://www.worldscholarsreview.org/article/the-current-state-of-nuclear-fusion-research-a-review-and-assessment-of-leading-technologies
+[8] (web) Nuclear fusion power, fusion energy research, ITER | IAEA
+http://www.iaea.org/topics/fusion
+[9] (web) Fusion energy: Pathway to abundant power
+https://www.nsf.gov/science-matters/fusion-energy-pathway-abundant-power
+History: saved
+Session: 13
+9 documents; 3 providers; total 3.26 seconds; answer ready 3.26 seconds; cache: 0 hits, 0 misses, 3 bypasses; 0 read errors, 0 write errors

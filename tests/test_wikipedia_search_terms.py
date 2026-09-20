@@ -13,6 +13,7 @@ tests pin the term generation and the retry-until-non-empty behaviour around it.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -150,3 +151,34 @@ class TestFetchUsesTermsInOrder:
         )
 
         assert fetcher.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_each_candidate_gets_its_own_timeout_budget(self, monkeypatch):
+        """A question needing several candidates must not exhaust one deadline.
+
+        The sweep first shared a single `timeout_seconds` window, so a question
+        whose working term came late timed out before that term was ever tried.
+        Observed live on "How do transformer-based language models handle long
+        context windows?", which reported `source_timeout: wikipedia`.
+        """
+        seen: list[str] = []
+
+        async def slow_then_hit(query, *, max_results, client):
+            seen.append(query)
+            # Every candidate costs most of one attempt window; only the
+            # fourth returns anything. A shared deadline would expire first.
+            await asyncio.sleep(0.04)
+            return [source("Context window")] if query == "context windows" else []
+
+        monkeypatch.setitem(ai_service._FETCHERS, "wikipedia", slow_then_hit)
+        service = AIFetchService(timeout_seconds=0.08, min_interval_seconds=0.0)
+
+        result = await service.fetch(
+            "wikipedia",
+            "How do transformer-based language models handle long context windows?",
+            client=SimpleNamespace(headers={}),
+        )
+
+        assert [s.title for s in result] == ["Context window"]
+        assert "context windows" in seen
+        assert len(seen) > 1  # earlier candidates were tried and came back empty

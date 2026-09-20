@@ -1,0 +1,22 @@
+Mode: LIVE
+Question ID: q1
+Sources: wiki,arxiv,web
+Status: completed
+Note: completed means the application returned success; answer completeness still requires review.
+
+Question: What is photosynthesis and what are its main stages?
+
+Photosynthesis is a system of biological processes used by photopigment-bearing autotrophic organisms to convert light energy into the chemical energy needed to fuel their metabolism [1]. Typically referring to oxygenic photosynthesis, the process releases oxygen as a byproduct of water splitting and stores energy within intracellular organic compounds like carbohydrates [1]. The overall process can be broken down into two major stages: light-dependent reactions and light-independent reactions [8]. During the first stage, light-dependent reactions capture the energy of sunlight to generate the hydrogen carrier NADPH, ATP, and oxygen [7, 8, 9]. In the second stage, light-independent reactions use these products to capture and reduce carbon dioxide [7, 8].
+
+References:
+[1] (wikipedia) Photosynthesis
+https://en.wikipedia.org/wiki/Photosynthesis
+[7] (web) Photosynthesis - Wikipedia
+https://en.wikipedia.org/wiki/Photosynthesis
+[8] (web) Photosynthesis - National Geographic Society
+https://education.nationalgeographic.org/resource/photosynthesis
+[9] (web) Stages of Photosynthesis and Factors Influencing It
+https://conductscience.com/stages-of-photosynthesis-and-factors-influencing-it
+History: saved
+Session: 10
+9 documents; 3 providers; total 3.88 seconds; answer ready 3.88 seconds; cache: 0 hits, 0 misses, 3 bypasses; 0 read errors, 0 write errors

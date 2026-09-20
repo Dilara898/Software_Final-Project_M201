@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import functools
 import hashlib
 import logging
 import time
@@ -168,20 +169,34 @@ class AIFetchService:
                 )
             return result
 
-        async def _call() -> list[Source]:
-            # `ai.fetch_wikipedia` searches MediaWiki's opensearch endpoint,
-            # which matches title prefixes rather than free text, so a whole
-            # question matches nothing and comes back as an empty success.
-            # `wikipedia_search_terms` turns the question into title-shaped
-            # candidates; take the first that returns anything, most specific
-            # first. Other sources take the question as written.
-            if source != "wikipedia":
-                return await _fetch_term(query)
+        # `ai.fetch_wikipedia` searches MediaWiki's opensearch endpoint, which
+        # matches title prefixes rather than free text, so a whole question
+        # matches nothing and comes back as an empty success.
+        # `wikipedia_search_terms` turns the question into title-shaped
+        # candidates; take the first that returns anything, most specific
+        # first. Other sources take the question as written.
+        terms = (
+            (wikipedia_search_terms(query) or [query])
+            if source == "wikipedia"
+            else [query]
+        )
 
-            terms = wikipedia_search_terms(query) or [query]
+        start = time.monotonic()
+        try:
             result: list[Source] = []
             for position, term in enumerate(terms, 1):
-                result = await _fetch_term(term)
+                # Each candidate gets its own attempt budget. Sharing one
+                # deadline across the whole sweep made a question that needs
+                # several candidates time out before the term that works was
+                # ever tried -- observed live on the long-context question.
+                result = await call_with_retry(
+                    functools.partial(_fetch_term, term),
+                    operation=f"fetch:{source}",
+                    timeout_seconds=self._timeout_seconds,
+                    max_attempts=self._max_attempts,
+                    initial_wait_seconds=self._initial_wait_seconds,
+                    max_wait_seconds=self._max_wait_seconds,
+                )
                 if result:
                     if position > 1:
                         # Never log the term itself: it is derived from the
@@ -190,19 +205,7 @@ class AIFetchService:
                             "wikipedia_term_resolved",
                             extra={"attempt": position, "candidates": len(terms)},
                         )
-                    return result
-            return result
-
-        start = time.monotonic()
-        try:
-            result = await call_with_retry(
-                _call,
-                operation=f"fetch:{source}",
-                timeout_seconds=self._timeout_seconds,
-                max_attempts=self._max_attempts,
-                initial_wait_seconds=self._initial_wait_seconds,
-                max_wait_seconds=self._max_wait_seconds,
-            )
+                    break
         except Exception as exc:
             log.warning(
                 "fetch_exhausted",
